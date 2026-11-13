@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+{% block title %}{{ row.title }} · Download · newcut{% endblock %}
+{% block content %}
+{% if let Some(artist) = row.artist_mbid %}<a class="back" href="/artists/{{ artist }}">← {{ row.artist }}</a>{% else %}<a class="back" href="/releases?status=missing">← Latest releases</a>{% endif %}
+<header class="page-head">
+  <div class="artist-head">
+    {% if let Some(cover) = row.image %}<img class="cover large" src="{{ cover }}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'cover large missing-art', textContent: '♪'}))">{% else %}<div class="cover large missing-art">♪</div>{% endif %}
+    <div class="artist-head-text">
+      <h1>{{ row.title }}</h1>
+      <div class="totals">
+        {% if let Some(artist) = row.artist_mbid %}<a href="/artists/{{ artist }}">{{ row.artist }}</a>{% else %}<span>{{ row.artist }}</span>{% endif %}
+        <span class="pill st-{{ row.status }}">{{ row.label }}</span>
+        <span>{{ row.kind }}</span>
+        <span>{{ row.date.as_deref().unwrap_or("Date unknown") }}</span>
+        <a href="{{ row.link }}" target="_blank" rel="noopener">{{ row.link_label }}</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div id="downloads" data-download-live hx-disinherit="*" hx-get="/download/{{ row.key }}/downloads" hx-trigger="load, downloads-changed from:body, download-changed[detail.key=='{{ row.key }}'||detail.key=='*'] delay:500ms from:body"></div>
+
+<form class="download-search" hx-post="/download/{{ row.key }}/searches" hx-target="#download-results" hx-trigger="submit{% if search_now %}, load{% endif %}" hx-sync="this:replace" hx-disabled-elt="find button">
+  <input type="search" name="q" value="{{ query }}" aria-label="Search Soulseek for" required>
+  <button type="submit" class="primary">Search</button>
+</form>
+<div id="download-results"></div>
+{% endblock %}

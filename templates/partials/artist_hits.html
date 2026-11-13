@@ -1,0 +1,22 @@
+{% if let Some(error) = error %}<p class="flash error">{{ error }}</p>
+{% else if hits.is_empty() %}{% if !query.is_empty() %}<p class="empty">No artists named like “{{ query }}” on MusicBrainz.</p>{% endif %}
+{% else %}
+<div class="card">
+{% for hit in hits %}
+  <div class="row inline">
+    <div class="row-main">
+      <a class="row-title" href="https://musicbrainz.org/artist/{{ hit.mbid }}" target="_blank" rel="noopener">{{ hit.name }}</a>
+      {% if hit.disambiguation.is_some() || hit.area.is_some() %}<div class="meta">
+        {% if let Some(d) = hit.disambiguation %}<span>{{ d }}</span>{% endif %}
+        {% if let Some(a) = hit.area %}<span>{{ a }}</span>{% endif %}
+      </div>{% endif %}
+    </div>
+    <div class="row-side">
+      {% if hit.followed %}<a class="pill st-owned" href="/artists/{{ hit.mbid }}">Following</a>
+      {% else if hit.known %}<button type="button" class="small" hx-post="/artists/{{ hit.mbid }}/follow">Follow</button>
+      {% else %}<button type="button" class="small primary" hx-post="/artists/add" hx-vals="{{ hit.vals }}">Follow</button>{% endif %}
+    </div>
+  </div>
+{% endfor %}
+</div>
+{% endif %}

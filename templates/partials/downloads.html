@@ -1,0 +1,37 @@
+{% if !downloads.is_empty() %}
+<section class="downloads">
+  <div class="section-head"><h2>Downloads · {{ downloads.len() }}</h2>{% if let Some(error) = error %}<span class="hint">slskd: {{ error }}</span>{% endif %}</div>
+  <div class="card">
+  {% for d in downloads %}
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">{{ d.name }}</div>
+        <div class="meta match">
+          {% if d.match_kind == "exact" %}<span class="pill st-owned">For {{ d.release.as_deref().unwrap_or_default() }}</span>
+          {% else if d.match_kind == "chosen" %}<span class="pill st-owned">Tagged as {{ d.release.as_deref().unwrap_or_default() }}</span>
+          {% else if d.match_kind == "likely" %}<span class="pill st-upcoming">Likely {{ d.release.as_deref().unwrap_or_default() }}</span>{% if let Some(why) = d.match_reason %}<span>{{ why }}</span>{% endif %}
+          {% else if let Some(why) = d.match_reason %}<span class="pill st-missing">No exact match</span><span>{{ why }}</span>
+          {% else %}<span class="pill st-other">Not matched</span>{% endif %}
+        </div>
+        <div class="meta">
+          <span class="pill {% match d.status %}{% when Some("ok") %}st-owned{% when Some("active") %}st-upcoming{% when Some("queued") %}st-other{% when Some(_) %}st-missing{% when None %}st-other{% endmatch %}">{{ d.label }}</span>
+          <span>{{ d.tracks }} track{% if d.tracks != 1 %}s{% endif %}</span>
+          <span>{{ d.size }}</span>
+          {% if let Some(speed) = d.speed %}<span>{{ speed }}</span>{% endif %}
+          <span>Queued {{ d.queued_at }}</span>
+        </div>
+        {% if d.state == "filed" %}<div class="meta"><span class="pill st-owned">Filed</span>{% if let Some(to) = d.filed_to %}<code>{{ to }}</code>{% endif %}</div>
+        {% else if d.state == "manual" %}<div class="meta"><a class="pill st-missing" href="/downloads">Needs you</a>{% if let Some(why) = d.detail %}<span>{{ why }}</span>{% endif %}</div>
+        {% else if d.state == "handled" %}<div class="meta"><span class="pill st-other">Dealt with</span></div>{% endif %}
+        {% if d.status == Some("active") %}<div class="bar st-downloading download-bar"><span style="width: {{ d.percent }}%"></span></div>{% endif %}
+        <div class="meta"><span>{{ d.username }}</span><code title="{{ d.dir }}">{{ d.dir }}</code></div>
+      </div>
+      <div class="row-side">
+        <button type="button" class="small" hx-post="/download/{{ key }}/downloads/{{ d.id }}/forget" title="Stop listing it here (slskd keeps it)">Forget</button>
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+  {% if pending %}<span hidden hx-get="/download/{{ key }}/downloads" hx-trigger="load delay:3s" hx-target="#downloads"></span>{% endif %}
+</section>
+{% endif %}

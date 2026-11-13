@@ -1,0 +1,61 @@
+{% extends "layout.html" %}
+{% block title %}Artists · newcut{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Artists</h1>
+    <div class="totals"><span>{{ all_count }} artists in your libraries</span></div>
+  </div>
+</header>
+
+<nav class="filter-bar" aria-label="Filter">
+  <a class="chip{% if status.is_empty() %} active{% endif %}" href="{{ self.status_link("") }}">All <b>{{ all_count }}</b></a>
+  {% for chip in chips %}
+  <a class="chip{% if chip.selected %} active{% endif %}" href="{{ self.status_link(chip.key) }}">{{ chip.label }} <b>{{ chip.count }}</b></a>
+  {% endfor %}
+</nav>
+
+<form method="get" action="/artists" class="search" role="search">
+  <input type="hidden" name="status" value="{{ status }}">
+  <input type="search" name="q" value="{{ query }}" placeholder="Search artists" aria-label="Search">
+  <button type="submit">Search</button>
+</form>
+
+{% if rows.is_empty() %}
+<div class="card"><p class="empty">{% if all_count == 0 %}No artists yet. Scan your libraries; albums need MusicBrainz tags.{% else %}No artists match.{% endif %}</p></div>
+{% else %}
+<div class="card">
+{% for artist in rows %}
+  <div class="row with-cover{% if !artist.followed %} dim{% endif %}">
+    {% if let Some(image) = artist.image %}<img class="cover avatar" src="{{ image }}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'cover avatar missing-art', textContent: '{{ artist.initial }}'}))">{% else %}<div class="cover avatar missing-art">{{ artist.initial }}</div>{% endif %}
+    <div class="row-main">
+      <a class="row-title" href="/artists/{{ artist.mbid }}">{{ artist.name }}</a>
+      <div class="meta">
+        {% if !artist.followed %}<span class="pill st-off">Not followed</span>{% endif %}
+        {% if artist.new > 0 %}<span class="badge-new">{{ artist.new }} new</span>{% endif %}
+        <span>{% if let Some(at) = artist.checked %}Checked {{ at }}{% else %}Not checked yet{% endif %}</span>
+        {% if let Some(error) = artist.error %}<span class="st-failed" title="{{ error }}">Last check failed</span>{% endif %}
+      </div>
+    </div>
+    <div class="row-side">
+      <div class="stats">
+        <a class="stat s-owned{% if artist.owned == 0 %} zero{% endif %}" href="/artists/{{ artist.mbid }}?status=owned"><b>{{ artist.owned }}</b><span>owned</span></a>
+        <a class="stat s-missing{% if artist.missing == 0 %} zero{% endif %}" href="/artists/{{ artist.mbid }}?status=missing"><b>{{ artist.missing }}</b><span>missing</span></a>
+        <a class="stat s-upcoming{% if artist.upcoming == 0 %} zero{% endif %}" href="/artists/{{ artist.mbid }}?status=upcoming"><b>{{ artist.upcoming }}</b><span>upcoming</span></a>
+      </div>
+      {% if artist.followed %}
+      <button class="small" hx-post="/artists/{{ artist.mbid }}/unfollow" title="Leave {{ artist.name }} out of Missing, New and the feed">Unfollow</button>
+      {% else %}
+      <button class="small" hx-post="/artists/{{ artist.mbid }}/follow">Follow</button>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}
+</div>
+<nav class="pages">
+  {% if page > 1 %}<a class="btn" href="{{ self.page_link(page - 1) }}">← Previous</a>{% endif %}
+  <span class="muted">Page {{ page }} of {{ pages }} · {{ total }} artists</span>
+  {% if page < pages %}<a class="btn" href="{{ self.page_link(page + 1) }}">Next →</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

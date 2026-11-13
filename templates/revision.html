@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+{% block title %}Revision {{ revision.rev }} · newcut{% endblock %}
+{% block content %}
+<a class="back" href="/config">← Config</a>
+<header class="page-head">
+  <div>
+    <h1>Revision {{ revision.rev }}</h1>
+    <div class="totals"><span>{{ revision.created_at }}</span><span>{{ revision.origin }}</span>{% if revision.rev == current %}<span class="pill st-ok">current</span>{% endif %}</div>
+  </div>
+  {% if revision.rev != current %}
+  <form hx-post="/config/rollback/{{ revision.rev }}"
+        hx-confirm="Make revision {{ revision.rev }} current again (as a new revision, written to the config file)?">
+    <button type="submit" class="primary">Roll back to revision {{ revision.rev }}</button>
+  </form>
+  {% endif %}
+</header>
+{% if revision.rev != current %}
+<section>
+  <div class="section-head"><h2>Rolling back changes</h2></div>
+  {% if changes.is_empty() %}
+  <div class="card"><p class="empty">The same settings as revision {{ current }}{% if !diff.is_empty() %}; only comments or formatting differ{% endif %}.</p></div>
+  {% else %}
+  <div class="card"><pre>{{ changes.join("\n") }}</pre></div>
+  {% endif %}
+  {% if !diff.is_empty() %}<details class="card"><summary>Text diff</summary><pre>{{ diff }}</pre></details>{% endif %}
+</section>
+{% endif %}
+<section>
+  <div class="section-head"><h2>Revision {{ revision.rev }}</h2></div>
+  <div class="card"><pre class="toml">{{ text }}</pre></div>
+</section>
+<script src="{{ crate::web::asset_url("toml.js") }}" defer></script>
+{% endblock %}

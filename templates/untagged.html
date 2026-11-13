@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+{% block title %}Untagged · newcut{% endblock %}
+{% block content %}
+<a class="back" href="/">← Dashboard</a>
+<header class="page-head">
+  <div>
+    <h1>Untagged</h1>
+    <div class="totals"><span>{{ folders.len() }} folders with files that have no MusicBrainz release id; tag them with MusicBrainz Picard so they count</span></div>
+  </div>
+</header>
+{% if folders.is_empty() %}
+<div class="card"><p class="empty">Every file has MusicBrainz tags.</p></div>
+{% else %}
+<div class="card">
+{% for folder in folders %}
+  <div class="row">
+    <div class="row-main">
+      <div class="row-title">{{ folder.album.as_deref().unwrap_or("Untitled") }}{% if let Some(artist) = folder.artist %} <span class="muted">· {{ artist }}</span>{% endif %}</div>
+      <div class="meta"><code>{{ folder.dir }}</code><span>{{ folder.files }} files</span></div>
+    </div>
+  </div>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

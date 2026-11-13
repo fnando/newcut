@@ -1,0 +1,112 @@
+<div id="status">
+  {% if let Some(message) = message %}<section><p class="flash" role="status">{{ message }}</p></section>{% endif %}
+
+  <section>
+    <div class="section-head">
+      <h2>Your library</h2>
+      <div class="actions">
+        <button class="small" hx-post="/actions/run/scanner" hx-target="#status" hx-swap="outerHTML">Scan now</button>
+        <button class="small primary" hx-post="/actions/run/discography" hx-target="#status" hx-swap="outerHTML">Check discographies</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">{{ status.artists }} artists{% if status.followed != status.artists %} · {{ status.followed }} followed{% endif %}</div>
+          <div class="meta">
+            <span>{% if let Some(at) = status.last_scan %}Scanned {{ at }}{% else %}Not scanned yet{% endif %}</span>
+            <span>{% if let Some(at) = status.last_fresh %}Fresh releases checked {{ at }}{% else %}Fresh releases not checked yet{% endif %}</span>
+          </div>
+        </div>
+        <div class="stats">
+          <a class="stat s-owned{% if status.owned == 0 %} zero{% endif %}" href="/artists"><b>{{ status.owned }}</b><span>owned</span></a>
+          <a class="stat s-missing{% if status.missing == 0 %} zero{% endif %}" href="/missing?status=missing"><b>{{ status.missing }}</b><span>missing</span></a>
+          <a class="stat s-upcoming{% if status.upcoming == 0 %} zero{% endif %}" href="/missing?status=upcoming"><b>{{ status.upcoming }}</b><span>upcoming</span></a>
+          <a class="stat{% if status.untagged == 0 %} zero{% endif %}" href="/untagged"><b>{{ status.untagged }}</b><span>untagged</span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>New &amp; upcoming · {{ status.new.len() }}</h2>{% if !status.new.is_empty() %}<a class="hint" href="/releases?status=new">See all</a>{% endif %}</div>
+    {% if status.new.is_empty() %}
+    <div class="card"><p class="empty">Nothing new from the artists you follow. Releases found after an artist's first check show up here.</p></div>
+    {% else %}
+    <div class="card">
+    {% let show_artist = true %}
+    {% for row in status.new.iter().take(10) %}
+      {% include "partials/release_row.html" %}
+    {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  {% if !status.problems.is_empty() %}
+  <section>
+    <div class="section-head danger"><h2>Problems · {{ status.problems.len() }}</h2></div>
+    {% for problem in status.problems %}
+    <div class="card err">
+      <div class="row"><div class="row-main"><div class="row-title">{{ problem.title }}</div></div></div>
+      <pre>{{ problem.text }}</pre>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section>
+    <div class="section-head"><h2>Libraries · {{ status.libraries.len() }}</h2></div>
+    {% if status.libraries.is_empty() %}
+    <div class="card"><p class="empty">No libraries yet; add your music folders to <code>libraries</code> in your <a href="/config">config</a>.</p></div>
+    {% endif %}
+    {% for library in status.libraries %}
+    <div class="card">
+      <div class="row{% if !library.exists %} dim{% endif %}">
+        <div class="row-main">
+          <div class="row-title"><code>{{ library.path }}</code></div>
+          <div class="meta">
+            {% if !library.exists %}<span class="pill st-failed">Not found</span>{% endif %}
+            <span>{{ library.files }} files</span>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat{% if library.artists == 0 %} zero{% endif %}"><b>{{ library.artists }}</b><span>artists</span></div>
+          <div class="stat s-owned{% if library.albums == 0 %} zero{% endif %}"><b>{{ library.albums }}</b><span>albums</span></div>
+          <a class="stat{% if library.untagged == 0 %} zero{% endif %}" href="/untagged"><b>{{ library.untagged }}</b><span>untagged</span></a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Daemon</h2></div>
+    <div class="card">
+      {% for service in status.services %}
+      <div class="row inline">
+        <div class="row-main">
+          <div class="row-title">{{ service.name }}</div>
+          <div class="row-sub">{{ service.describe }}</div>
+          <div class="meta">
+            <span class="pill st-{{ service.status }}">{{ service.status }}</span>
+            {% if let Some(activity) = service.activity %}<span>{{ activity }}</span>{% endif %}
+            {% if service.restarts > 0 %}<span title="{{ service.last_error.as_deref().unwrap_or_default() }}">restarted {{ service.restarts }}×</span>{% endif %}
+          </div>
+        </div>
+        <div class="row-side">
+          {% if !service.off %}
+            {% if service.runnable && !service.paused %}
+            <button class="small" hx-post="/actions/run/{{ service.name }}" hx-target="#status" hx-swap="outerHTML">Run now</button>
+            {% endif %}
+            {% if service.paused %}
+            <button class="small" hx-post="/actions/services/{{ service.name }}/resume" hx-target="#status" hx-swap="outerHTML">Resume</button>
+            {% else if service.runnable %}
+            <button class="small" hx-post="/actions/services/{{ service.name }}/pause" hx-target="#status" hx-swap="outerHTML">Pause</button>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>

@@ -1,0 +1,28 @@
+<nav class="filter-bar" aria-label="Status">
+  <a class="chip{% if list.status.is_empty() %} active{% endif %}" href="{{ list.status_link("") }}">All</a>
+  {% for chip in list.chips %}
+  <a class="chip{% if chip.selected %} active{% endif %}" href="{{ list.status_link(chip.key) }}"><span class="dot g-{{ chip.key }}"></span>{{ chip.label }} <b>{{ chip.count }}</b></a>
+  {% endfor %}
+</nav>
+
+<form method="get" action="{{ list.path }}" class="search" role="search">
+  <input type="hidden" name="status" value="{{ list.status }}">
+  <input type="search" name="q" value="{{ list.query }}" placeholder="Search titles or artists" aria-label="Search">
+  <button type="submit">Search</button>
+</form>
+
+{% if list.rows.is_empty() %}
+<div class="card"><p class="empty">{{ empty }}{% if !list.status.is_empty() || !list.query.is_empty() %} matches{% endif %}.</p></div>
+{% else %}
+<div class="card">
+{% let show_artist = true %}
+{% for row in list.rows %}
+  {% include "partials/release_row.html" %}
+{% endfor %}
+</div>
+<nav class="pages">
+  {% if list.page > 1 %}<a class="btn" href="{{ list.page_link(list.page - 1) }}">← Newer</a>{% endif %}
+  <span class="muted">Page {{ list.page }} of {{ list.pages }} · {{ list.total }} releases</span>
+  {% if list.page < list.pages %}<a class="btn" href="{{ list.page_link(list.page + 1) }}">Older →</a>{% endif %}
+</nav>
+{% endif %}

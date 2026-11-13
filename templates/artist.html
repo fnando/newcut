@@ -1,0 +1,82 @@
+{% extends "layout.html" %}
+{% block title %}{{ artist.name }} · newcut{% endblock %}
+{% block feeds %}<link rel="alternate" type="application/atom+xml" title="New releases by {{ artist.name }}" href="/artists/{{ artist.mbid }}/feed.atom">{% endblock %}
+{% block content %}
+<a class="back" href="/artists">← Artists</a>
+<header class="page-head">
+  <div class="artist-head">
+    {% if let Some(image) = image %}<img class="cover avatar large" src="{{ image }}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'cover avatar large missing-art', textContent: '{{ initial }}'}))">{% else %}<div class="cover avatar large missing-art">{{ initial }}</div>{% endif %}
+    <div class="artist-head-text">
+    <h1>{{ artist.name }}</h1>
+    <div class="totals">
+      {% if !artist.followed %}<span class="pill st-off">Not followed</span>{% endif %}
+      <span>{% if let Some(at) = checked %}Checked {{ at }}{% else %}Not checked yet{% endif %}</span>
+      {% if let Some(at) = next_check %}<span>Next check {{ at }}</span>{% endif %}
+      <a href="https://musicbrainz.org/artist/{{ artist.mbid }}" target="_blank" rel="noopener">MusicBrainz</a>
+      <a href="/artists/{{ artist.mbid }}/feed.atom" title="Atom feed of {{ artist.name }}'s new releases, for your feed reader" class="feed"><img class="feed-icon" src="{{ crate::web::asset_url("rss.svg") }}" alt="Feed"></a>
+    </div>
+    </div>
+  </div>
+  <div class="actions">
+    {% if artist.followed %}
+    <button hx-post="/artists/{{ artist.mbid }}/unfollow" title="Leave this artist out of Missing, New and the feed">Unfollow</button>
+    {% else %}
+    <button hx-post="/artists/{{ artist.mbid }}/follow">Follow</button>
+    {% endif %}
+    <button class="primary" hx-post="/artists/{{ artist.mbid }}/refresh">Check now</button>
+  </div>
+</header>
+
+{% if !members.is_empty() %}<p class="flash">{{ artist.name }} is a joined artist: their releases are listed under {% for (mbid, name) in members %}{% if !loop.first %}{% if loop.last %} and {% else %}, {% endif %}{% endif %}<a href="/artists/{{ mbid }}">{{ name }}</a>{% endfor %}.</p>{% endif %}
+{% if let Some(error) = artist.last_error %}<p class="flash error" role="alert">{{ error }}</p>{% endif %}
+
+<nav class="filter-bar" aria-label="Status">
+  <a class="chip{% if status.is_empty() %} active{% endif %}" href="{{ self.status_link("") }}">All <b>{{ all_count }}</b></a>
+  {% for chip in chips %}
+  <a class="chip{% if chip.selected %} active{% endif %}" href="{{ self.status_link(chip.key) }}"><span class="dot g-{{ chip.key }}"></span>{{ chip.label }} <b>{{ chip.count }}</b></a>
+  {% endfor %}
+</nav>
+
+{% if sections.is_empty() %}
+<div class="card"><p class="empty">{% if checked.is_none() %}Not checked on MusicBrainz yet; it's on its way.{% else %}Nothing here.{% endif %}</p></div>
+{% else %}
+{% let show_artist = false %}
+{% for section in sections %}
+<section>
+  <div class="section-head">
+    <h2>{{ section.title }} · {{ section.rows.len() }}</h2>
+    {% if section.ignorable > 1 %}
+    <button class="small" hx-post="/artists/{{ artist.mbid }}/ignore-missing?type={{ section.key }}"
+            title="They leave Missing and the feed"
+            hx-confirm="Ignore all {{ section.ignorable }} missing {{ section.title|lower }} by {{ artist.name }}?">Ignore all {{ section.ignorable }} missing</button>
+    {% endif %}
+  </div>
+  <div class="card">
+  {% for row in section.rows %}
+    {% include "partials/release_row.html" %}
+  {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% endif %}
+
+{% if !unmatched.is_empty() %}
+<section>
+  <div class="section-head"><h2>In your library, not in the discography · {{ unmatched.len() }}</h2><span class="hint">Appearances on others' releases, or tags MusicBrainz doesn't list for this artist</span></div>
+  <div class="card">
+  {% for album in unmatched %}
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">{{ album.album.as_deref().unwrap_or("Untitled") }}</div>
+        <div class="meta">
+          <code>{{ album.dir }}</code>
+          <span>{{ album.tracks }} tracks</span>
+          {% if let Some(group) = album.release_group_mbid %}<a href="https://musicbrainz.org/release-group/{{ group }}" target="_blank" rel="noopener">MusicBrainz</a>{% else %}<span>Release group not known yet</span>{% endif %}
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

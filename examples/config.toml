@@ -1,0 +1,102 @@
+#:schema https://raw.githubusercontent.com/fnando/newcut/main/schema/newcut.v1.schema.json
+# newcut config. Every key but `version` is optional; the values below are
+# the defaults.
+version = 1
+
+# Music folders to scan. Albums need MusicBrainz tags (as MusicBrainz Picard
+# writes them); `~` and `$VAR` are expanded.
+libraries = ["~/Music"]
+
+[server]
+# Serve the web UI from the daemon (`newcut run`).
+enabled = true
+# Where it listens.
+listen = "127.0.0.1:55460"
+# When set, the web UI asks for it (the feeds stay open). Required when
+# `listen` is reachable from other machines (not 127.0.0.1 or ::1). "$NAME" (or
+# "${NAME}") reads it from that environment variable.
+# token = "$NEWCUT_TOKEN"
+
+[musicbrainz]
+# A mirror works too; only musicbrainz.org is limited to one request a second.
+server = "https://musicbrainz.org"
+# How MusicBrainz can reach you, for the User-Agent (an email or a URL).
+# contact = "you@example.com"
+
+[listenbrainz]
+# Check ListenBrainz's fresh releases (one request covers every artist).
+enabled = true
+server = "https://api.listenbrainz.org"
+
+[discography]
+# Which release groups count toward an artist's discography: primary types
+# (Album, Single, EP, Broadcast, Other)…
+primary_types = ["Album", "EP"]
+# …and the secondary types allowed (Compilation, Live, Remix, Soundtrack,
+# Demo, …). Empty: only release groups with none.
+secondary_types = []
+# Leave out releases whose titles match any of these regular expressions
+# (`(?i)` ignores case): handy for live albums MusicBrainz doesn't call live.
+exclude = []
+# exclude = ['(?i)\b(ao|en) vivo\b', '(?i)[(\[]live\b']
+
+[covers]
+# Show the covers of albums you have from their folders (the first of
+# `files` there), instead of loading them from the Cover Art Archive. Albums
+# without one, and those you don't have, still come from the Cover Art
+# Archive.
+local = false
+# The file names to look for, in order (case doesn't matter).
+files = ["cover.jpg", "folder.jpg"]
+# The same for artist images, in an artist's folder (the one their album
+# folders are in). Artists without one get their initial.
+artist_files = ["artist.jpg", "folder.jpg"]
+
+[slskd]
+# With slskd (https://github.com/slskd/slskd), a missing album's title leads
+# to a page that searches Soulseek for it, where you pick a folder to
+# download.
+enabled = false
+server = "http://localhost:5030"
+# An API key from slskd's config (web.authentication.api_keys). "$NAME" (or
+# "${NAME}") reads it from that environment variable (which can be in
+# ~/.config/newcut/env).
+api_key = "$SLSKD_API_KEY"
+# To tag and file finished downloads: slskd's downloads folder as this
+# machine sees it, and where albums go. Downloads that match a release
+# exactly are tagged (as MusicBrainz Picard tags them) and moved there; the
+# rest wait for you on the Downloads page. Placeholders: %{artist},
+# %{artist_sort}, %{album}, %{year} (first release), %{date}, %{release_year},
+# %{country}, %{media}, %{label}, %{catalog_number}, %{type}, %{releaseid},
+# %{releasegroupid}.
+# downloads_dir = "/srv/slskd/downloads"
+# output_dir = "~/Music/%{artist}/%{album} (%{year})"
+
+[schedule]
+# Scan the libraries.
+scan = "6h"
+# Check each artist's discography on MusicBrainz.
+artist = "7d"
+# Check ListenBrainz's fresh releases.
+fresh = "1d"
+# Releases out within this long, or coming, count as new.
+new_window = "60d"
+# Send notifications of what's new (when a channel below is set up).
+notification = "1d"
+
+[notification]
+# What to tell you about: "missing" (new releases you don't have) or "all"
+# (the ones you already have too).
+strategy = "missing"
+
+# Pushover (https://pushover.net): your application's API token and your
+# user key. "$NAME" (or "${NAME}") reads one from that environment variable
+# (which can be in ~/.config/newcut/env).
+# [notification.pushover]
+# app_api_token = "$PUSHOVER_APP_TOKEN"
+# user_key = "$PUSHOVER_USER_KEY"
+
+# Your own program: it gets each notification as JSON on stdin.
+# [notification.command]
+# bin = "~/.bin/newcut-notify"
+# timeout = "1m"

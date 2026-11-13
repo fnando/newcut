@@ -1,0 +1,57 @@
+{% extends "layout.html" %}
+{% block title %}Downloads · newcut{% endblock %}
+{% block content %}
+{# Redrawn when a download changes, unless you're picking a release. #}
+<div id="downloads-page" data-download-live hx-disinherit="*" hx-get="/downloads" hx-select="#downloads-page" hx-swap="outerHTML" hx-trigger="download-changed[!document.querySelector('#downloads-page .tag-as[open]')] delay:500ms from:body">
+<header class="page-head">
+  <div>
+    <h1>Downloads</h1>
+    <div class="totals"><span>What you queued in slskd{% if filing %}: exact matches are tagged and filed once downloaded; the rest wait for you here{% endif %}</span></div>
+  </div>
+</header>
+{% if !filing %}<p class="flash">Set <code>slskd.downloads_dir</code> and <code>slskd.output_dir</code> to have finished downloads tagged and filed.</p>{% endif %}
+{% for section in sections %}{% if !section.rows.is_empty() %}
+<section>
+  <div class="section-head"><h2>{{ section.title }} · {{ section.rows.len() }}</h2><span class="hint">{{ section.hint }}</span></div>
+  <div class="card">
+  {% for d in section.rows %}
+    <div class="row">
+      <div class="row-main">
+        <a class="row-title" href="/download/{{ d.key }}">{{ d.album }}</a>
+        {% if !d.artist.is_empty() %}<div class="row-sub">{{ d.artist }}</div>{% endif %}
+        <div class="meta">
+          {% if d.state == "manual" %}<span class="pill st-missing">Needs you</span>{% if let Some(why) = d.detail %}<span>{{ why }}</span>{% endif %}
+          {% else if d.state == "failed" %}<span class="pill st-missing">Download failed</span>{% if let Some(why) = d.detail %}<span>{{ why }}</span>{% endif %}
+          {% else if d.state == "filed" %}<span class="pill st-owned">Filed</span>
+          {% else if d.state == "handled" %}<span class="pill st-other">Dealt with</span>
+          {% else %}<span class="pill st-upcoming">Downloading</span>{% endif %}
+          {% if d.match_kind == "exact" %}<span>Matches {{ d.release.as_deref().unwrap_or_default() }}</span>
+          {% else if d.match_kind == "chosen" %}<span>Tagged as {{ d.release.as_deref().unwrap_or_default() }}</span>
+          {% else if d.state == "manual" %}
+          {% else if d.match_kind == "likely" %}<span>Likely {{ d.release.as_deref().unwrap_or_default() }}{% if let Some(why) = d.match_reason %} ({{ why }}){% endif %}</span>
+          {% else if let Some(why) = d.match_reason %}<span>No exact match: {{ why }}</span>{% endif %}
+        </div>
+        <div class="meta"><span>{{ d.folder }} · {{ d.tracks }} track{% if d.tracks != 1 %}s{% endif %} from {{ d.username }}</span><span>Queued {{ d.queued_at }}</span></div>
+        {% if let Some(path) = d.path %}<div class="meta"><code title="{% if d.state == "filed" %}Where it went{% else %}Where slskd puts it{% endif %}">{{ path }}</code></div>{% endif %}
+        {% if d.state == "manual" && filing %}
+        <details class="tag-as" hx-get="/downloads/{{ d.id }}/releases" hx-trigger="toggle once" hx-target="find .tag-as-releases">
+          <summary>Tag it as…</summary>
+          <div class="tag-as-releases"><p class="hint">Getting its releases…</p></div>
+        </details>
+        {% endif %}
+      </div>
+      <div class="row-side">
+        {% if d.state == "manual" %}
+          <button type="button" class="small" hx-post="/downloads/{{ d.id }}/retry" title="File it again as it matched (after you made room, say)">Try again</button>
+          <button type="button" class="small" hx-post="/downloads/{{ d.id }}/handled" title="You tagged or moved it yourself">I dealt with it</button>
+        {% endif %}
+        <button type="button" class="small" hx-post="/download/{{ d.key }}/downloads/{{ d.id }}/forget" hx-on::after-request="location.reload()" title="Stop listing it (slskd and the files are left alone)">Forget</button>
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}{% endfor %}
+{% if empty %}<p class="empty">Nothing queued yet: pick a folder on a missing album's page.</p>{% endif %}
+</div>
+{% endblock %}

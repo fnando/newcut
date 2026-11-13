@@ -1,0 +1,49 @@
+{% match view %}
+{% when ResultsView::Error(error) %}<p class="flash error">{{ error }}</p>
+{% when ResultsView::Searching(users, files) %}<p class="empty searching" hx-get="/download/{{ key }}/searches/{{ id }}" hx-trigger="load delay:1s" hx-swap="outerHTML">Searching Soulseek…{% if *users > 0 %} {{ users }} user{% if *users != 1 %}s{% endif %} answered so far, with {{ files }} file{% if *files != 1 %}s{% endif %}.{% endif %}</p>
+{% when ResultsView::Done { folders, total, users, exact, releases, unmatched } %}
+{% if folders.is_empty() %}<p class="empty">No albums found{% if *users > 0 %} ({{ users }} user{% if *users != 1 %}s{% endif %} answered, with no audio folders){% endif %}. Try fewer words, or just the title.</p>
+{% else %}
+<div class="section-head"><h2>{{ total }} folder{% if *total != 1 %}s{% endif %} from {{ users }} user{% if *users != 1 %}s{% endif %}{% if *releases > 0 %} · {{ exact }} exact match{% if *exact != 1 %}es{% endif %}{% endif %}</h2><span class="hint">{% if *total > folders.len() %}The best {{ folders.len() }}: free upload slots first{% else %}Free upload slots first{% endif %}, then lossless, then the fastest{% if *releases > 0 %}; matches before both{% endif %}</span></div>
+{% if let Some(why) = unmatched %}<p class="flash error">Folders aren't matched to releases: {{ why }}</p>{% endif %}
+<div class="card">
+{% for folder in folders %}
+  <div class="row{% if !folder.lossless %} dim{% endif %}"{% if !folder.lossless %} title="Not lossless"{% endif %}>
+    <div class="row-main">
+      <div class="row-title">{{ folder.name }}</div>
+      {% if *releases > 0 %}<div class="meta match">{% match folder.kind %}
+        {% when matching::Kind::Exact %}<span class="pill st-owned">Matches {{ folder.release.as_deref().unwrap_or_default() }}</span>{% if folder.alike > 0 %}<span>and {{ folder.alike }} other release{% if folder.alike != 1 %}s{% endif %} with the same tracks</span>{% endif %}
+        {% when matching::Kind::Likely %}<span class="pill st-upcoming">Likely {{ folder.release.as_deref().unwrap_or_default() }}</span>{% if let Some(why) = folder.reason %}<span>{{ why }}</span>{% endif %}
+        {% when matching::Kind::None %}<span class="pill st-other">No match</span>{% if let Some(why) = folder.reason %}<span>{{ why }}</span>{% endif %}
+      {% endmatch %}</div>{% endif %}
+      <div class="meta">
+        <span class="pill {% if folder.lossless %}st-owned{% else %}st-other{% endif %}">{{ folder.format }}{% if let Some(q) = folder.quality %} · {{ q }}{% endif %}</span>
+        <span>{{ folder.tracks }} track{% if folder.tracks != 1 %}s{% endif %}</span>
+        {% if let Some(length) = folder.length %}<span>{{ length }}</span>{% endif %}
+        <span>{{ folder.size }}</span>
+        <span title="Their upload speed">{{ folder.speed }}</span>
+        {% if folder.free_slot %}<span>Free slot</span>{% else %}<span title="No free upload slot: you'd wait in their queue">Queue {{ folder.queue }}</span>{% endif %}
+      </div>
+      <div class="meta"><span>{{ folder.username }}</span><code title="{{ folder.dir }}">{{ folder.dir }}</code></div>
+      <details class="folder-files">
+        <summary>{{ folder.tracks }} file{% if folder.tracks != 1 %}s{% endif %}</summary>
+        <table>
+        {% for file in folder.files %}
+          <tr>
+            <td class="file-name">{{ file.name }}</td>
+            <td class="num">{{ file.length.as_deref().unwrap_or("?") }}</td>
+            <td class="num">{{ file.size }}</td>
+            {% if *releases > 0 %}<td class="file-track">{% if let Some(track) = file.track %}→ {{ track }}{% endif %}</td>{% endif %}
+          </tr>
+        {% endfor %}
+        </table>
+      </details>
+    </div>
+    <div class="row-side">
+      <button type="button" class="small primary" hx-post="/download/{{ key }}/searches/{{ id }}/queue" hx-vals="{{ folder.vals }}" hx-swap="outerHTML" hx-disabled-elt="this">Download</button>
+    </div>
+  </div>
+{% endfor %}
+</div>
+{% endif %}
+{% endmatch %}

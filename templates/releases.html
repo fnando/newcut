@@ -1,0 +1,12 @@
+{% extends "layout.html" %}
+{% block title %}Latest releases · newcut{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Latest releases</h1>
+    <div class="totals"><span>Everything the artists you follow released or will, newest first</span><a href="/feed.atom" class="feed" title="Atom feed of new releases, for your feed reader"><img class="feed-icon" src="{{ crate::web::asset_url("rss.svg") }}" alt="Feed of new releases"></a></div>
+  </div>
+</header>
+{% let empty = "No releases yet: they show up once your artists are checked" %}
+{% include "partials/release_list.html" %}
+{% endblock %}

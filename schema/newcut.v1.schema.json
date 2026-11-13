@@ -1,0 +1,408 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "newcut config",
+  "description": "The whole config file.",
+  "type": "object",
+  "properties": {
+    "covers": {
+      "$ref": "#/$defs/CoversConfig",
+      "default": {
+        "artist_files": [
+          "artist.jpg",
+          "folder.jpg"
+        ],
+        "files": [
+          "cover.jpg",
+          "folder.jpg"
+        ],
+        "local": false
+      }
+    },
+    "discography": {
+      "$ref": "#/$defs/DiscographyConfig",
+      "default": {
+        "exclude": [],
+        "primary_types": [
+          "Album",
+          "EP"
+        ],
+        "secondary_types": []
+      }
+    },
+    "libraries": {
+      "description": "Music folders to scan (`~` and `$VAR` are expanded).",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "listenbrainz": {
+      "$ref": "#/$defs/ListenBrainzConfig",
+      "default": {
+        "enabled": true,
+        "server": "https://api.listenbrainz.org"
+      }
+    },
+    "musicbrainz": {
+      "$ref": "#/$defs/MusicBrainzConfig",
+      "default": {
+        "contact": null,
+        "server": "https://musicbrainz.org"
+      }
+    },
+    "notification": {
+      "$ref": "#/$defs/NotificationConfig",
+      "default": {
+        "command": null,
+        "pushover": null,
+        "strategy": "missing"
+      }
+    },
+    "schedule": {
+      "$ref": "#/$defs/ScheduleConfig",
+      "default": {
+        "artist": "1w",
+        "fresh": "1d",
+        "new_window": "8w4d",
+        "notification": "1d",
+        "scan": "6h"
+      }
+    },
+    "server": {
+      "$ref": "#/$defs/ServerConfig",
+      "default": {
+        "enabled": true,
+        "listen": "127.0.0.1:55460",
+        "token": null
+      }
+    },
+    "slskd": {
+      "$ref": "#/$defs/SlskdConfig",
+      "default": {
+        "api_key": "",
+        "downloads_dir": null,
+        "enabled": false,
+        "output_dir": null,
+        "server": "http://localhost:5030"
+      }
+    },
+    "version": {
+      "description": "The config format version: `1`.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "$defs": {
+    "CommandConfig": {
+      "description": "Notifications through your own program: it gets them as JSON on stdin.",
+      "type": "object",
+      "properties": {
+        "bin": {
+          "description": "The program to run (`~` and `$VAR` are expanded), with no arguments.",
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "timeout": {
+          "description": "Stopped after this long.",
+          "$ref": "#/$defs/Duration",
+          "default": "1m"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "bin"
+      ]
+    },
+    "CoversConfig": {
+      "description": "Where album covers and artist images in the web UI come from.",
+      "type": "object",
+      "properties": {
+        "artist_files": {
+          "description": "The image file names to look for in an artist's folder (the one\ntheir album folders are in), in order (case doesn't matter). Artists\nwithout one get their initial.",
+          "type": "array",
+          "default": [
+            "artist.jpg",
+            "folder.jpg"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "description": "The cover file names to look for in an album's folder, in order\n(case doesn't matter).",
+          "type": "array",
+          "default": [
+            "cover.jpg",
+            "folder.jpg"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "local": {
+          "description": "Show the covers of albums you have from their folders (one of\n`files`), instead of the Cover Art Archive's. Albums without one, and\nthose you don't have, still use the Cover Art Archive.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "DiscographyConfig": {
+      "description": "Which release groups count toward an artist's discography.",
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "description": "Releases whose titles match any of these regular expressions are\nleft out too, e.g. `\"(?i)\\\\bao vivo\\\\b\"`.",
+          "$ref": "#/$defs/TitlePatterns",
+          "default": []
+        },
+        "primary_types": {
+          "description": "Album, Single, EP, Broadcast, Other.",
+          "type": "array",
+          "default": [
+            "Album",
+            "EP"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "secondary_types": {
+          "description": "Release groups with any other secondary type (Compilation, Live,\nRemix, …) are left out. Empty: only those with none.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Duration": {
+      "description": "A duration such as \"6h\", \"7d\" or \"1h30m\"",
+      "type": "string",
+      "pattern": "^([0-9]+[smhdw])+$"
+    },
+    "ListenBrainzConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Look for fresh releases on ListenBrainz.",
+          "type": "boolean",
+          "default": true
+        },
+        "server": {
+          "type": "string",
+          "default": "https://api.listenbrainz.org"
+        }
+      },
+      "additionalProperties": false
+    },
+    "MusicBrainzConfig": {
+      "type": "object",
+      "properties": {
+        "contact": {
+          "description": "How MusicBrainz can reach you (an email or URL); it goes into the\nUser-Agent, as MusicBrainz asks.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "server": {
+          "description": "The MusicBrainz server (or a mirror; only musicbrainz.org is\nthrottled to one request a second).",
+          "type": "string",
+          "default": "https://musicbrainz.org"
+        }
+      },
+      "additionalProperties": false
+    },
+    "NotificationConfig": {
+      "description": "Notifications of new releases (each channel is off until its section\nis there).",
+      "type": "object",
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pushover": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PushoverConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "strategy": {
+          "description": "What to tell you about: `missing` (new releases you don't have) or\n`all` (owned ones too).",
+          "$ref": "#/$defs/Strategy",
+          "default": "missing"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PushoverConfig": {
+      "description": "Notifications through Pushover (<https://pushover.net>).",
+      "type": "object",
+      "properties": {
+        "app_api_token": {
+          "description": "Your Pushover application's API token, or `\"$NAME\"` to read it from\nthat environment variable.",
+          "type": "string",
+          "default": ""
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "server": {
+          "description": "The Pushover API.",
+          "type": "string",
+          "default": "https://api.pushover.net"
+        },
+        "user_key": {
+          "description": "Your Pushover user (or group) key, or `\"$NAME\"`.",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScheduleConfig": {
+      "description": "How often each service does its work.",
+      "type": "object",
+      "properties": {
+        "artist": {
+          "description": "Check each artist's discography on MusicBrainz.",
+          "$ref": "#/$defs/Duration",
+          "default": "1w"
+        },
+        "fresh": {
+          "description": "Check ListenBrainz's fresh releases.",
+          "$ref": "#/$defs/Duration",
+          "default": "1d"
+        },
+        "new_window": {
+          "description": "Release groups out within this long (or coming) count as new.",
+          "$ref": "#/$defs/Duration",
+          "default": "8w4d"
+        },
+        "notification": {
+          "description": "Send notifications of new releases.",
+          "$ref": "#/$defs/Duration",
+          "default": "1d"
+        },
+        "scan": {
+          "description": "Scan the libraries.",
+          "$ref": "#/$defs/Duration",
+          "default": "6h"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ServerConfig": {
+      "description": "The web UI.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether the daemon serves the web UI.",
+          "type": "boolean",
+          "default": true
+        },
+        "listen": {
+          "description": "The address to listen on.",
+          "type": "string",
+          "default": "127.0.0.1:55460"
+        },
+        "token": {
+          "description": "When set, every page but the feeds needs it (sign in, or a bearer\nheader). `\"$NAME\"` or `\"${NAME}\"` reads it from that environment\nvariable instead.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "SlskdConfig": {
+      "description": "slskd (<https://github.com/slskd/slskd>): searching Soulseek for the\nalbums you're missing, and downloading them.",
+      "type": "object",
+      "properties": {
+        "api_key": {
+          "description": "An API key from slskd's config (`web.authentication.api_keys`), or\n`\"$NAME\"` to read it from that environment variable.",
+          "type": "string",
+          "default": ""
+        },
+        "downloads_dir": {
+          "description": "slskd's downloads folder (`directories.downloads`), as this machine\nsees it (`~` and `$VAR` are expanded). With `output_dir`, finished\ndownloads that match a release exactly are tagged and filed.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "enabled": {
+          "description": "Missing albums link to a page that searches slskd for them.",
+          "type": "boolean",
+          "default": false
+        },
+        "output_dir": {
+          "description": "Where tagged albums go: a path with placeholders, e.g.\n`\"~/Music/%{artist}/%{album} (%{year})\"`. Placeholders: `artist`,\n`artist_sort`, `album`, `year` (the first release's), `date` (this\nrelease's), `release_year`, `country`, `media`, `label`,\n`catalog_number`, `type`, `releaseid`, `releasegroupid`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "server": {
+          "description": "slskd's web address.",
+          "type": "string",
+          "default": "http://localhost:5030"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Strategy": {
+      "description": "What notifications tell you about.",
+      "oneOf": [
+        {
+          "description": "New releases you don't have.",
+          "type": "string",
+          "const": "missing"
+        },
+        {
+          "description": "New releases, owned or not.",
+          "type": "string",
+          "const": "all"
+        }
+      ]
+    },
+    "TitlePatterns": {
+      "description": "Regular expressions (Rust syntax; `(?i)` ignores case)",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "regex"
+      }
+    }
+  }
+}

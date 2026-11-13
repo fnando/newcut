@@ -1,0 +1,15 @@
+{% if let Some(error) = error %}<p class="flash error">{{ error }}</p>
+{% else %}
+<form hx-post="/downloads/{{ id }}/file" hx-target="this" hx-disabled-elt="find button" class="tag-as-form">
+  <p class="hint">Its {{ files }} file{% if files != 1 %}s{% endif %} become the release's tracks in order (by the numbers their names start with), whatever their lengths.</p>
+  {% for r in releases %}
+  <label class="tag-as-option{% if !r.fits %} dim{% endif %}">
+    <input type="radio" name="release" value="{{ r.mbid }}" required{% if !r.fits %} disabled{% endif %}{% if r.current && r.fits %} checked{% endif %}>
+    <span>{{ r.label }}</span>
+    <span class="hint">{{ r.tracks }} track{% if r.tracks != 1 %}s{% endif %}{% if r.current %} · its match{% endif %}</span>
+    <a class="hint" href="https://musicbrainz.org/release/{{ r.mbid }}" target="_blank" rel="noopener">MusicBrainz</a>
+  </label>
+  {% endfor %}
+  <button type="submit" class="small primary">Tag and file</button>
+</form>
+{% endif %}

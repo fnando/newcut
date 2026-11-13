@@ -1,0 +1,35 @@
+<section id="live">
+  <div class="section-head">
+    <h2>In progress</h2>
+    <span class="hint{% if !live.active.is_empty() %} busy{% endif %}">{% if live.active.is_empty() %}Nothing running{% else %}{{ live.active.len() }} at work{% endif %}</span>
+  </div>
+  {% if live.active.is_empty() %}
+  <div class="card"><p class="empty">Nothing being scanned or checked right now.</p></div>
+  {% else %}
+  <div class="card">
+  {% for active in live.active %}
+    <div class="row inline">
+      <div class="row-main">
+        <div class="row-title">{{ active.service }}</div>
+        <div class="meta"><span class="pill st-running">Running</span><span>{{ active.activity }}</span></div>
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+  {% endif %}
+  {% if !live.recent.is_empty() %}
+  <details{% if live.active.is_empty() %} open{% endif %}><summary>Just now · {{ live.recent.len() }}</summary>
+    <div class="card">
+    {% for recent in live.recent %}
+      <div class="row">
+        <div class="row-main">
+          {% if let Some(href) = recent.href %}<a class="row-title" href="{{ href }}">{{ recent.text }}</a>{% else %}<div class="row-title">{{ recent.text }}</div>{% endif %}
+          <div class="meta"><span>{{ recent.detail }}</span></div>
+        </div>
+        <div class="row-side"><small class="muted">{{ recent.at }}</small></div>
+      </div>
+    {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</section>

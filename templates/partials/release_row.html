@@ -1,0 +1,25 @@
+<div class="row with-cover{% if row.status == "ignored" || row.status == "other" %} dim{% endif %}"{% if row.page.is_some() %} data-download-live hx-disinherit="*" hx-get="/releases/{{ row.key }}/row{% if !show_artist %}?artist={{ row.artist_mbid.as_deref().unwrap_or_default() }}{% endif %}" hx-trigger="download-changed[detail.key=='{{ row.key }}'||detail.key=='*'] delay:500ms from:body" hx-swap="outerHTML"{% endif %}>
+  {% if let Some(cover) = row.image %}<img class="cover" src="{{ cover }}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'cover missing-art', textContent: '♪'}))">{% else %}<div class="cover missing-art">♪</div>{% endif %}
+  <div class="row-main">
+    {% if let Some(page) = row.page %}<a class="row-title" href="{{ page }}" title="Search slskd for it">{{ row.title }}</a>{% else %}<a class="row-title" href="{{ row.link }}" target="_blank" rel="noopener">{{ row.title }}</a>{% endif %}
+    {% if show_artist %}{% if let Some(artist) = row.artist_mbid %}<div class="row-sub"><a href="/artists/{{ artist }}">{{ row.artist }}</a></div>{% else %}<div class="row-sub">{{ row.artist }}</div>{% endif %}{% endif %}
+    <div class="meta">
+      <span class="pill st-{{ row.status }}">{{ row.label }}</span>
+      {% if row.is_new %}<span class="badge-new">New</span>{% endif %}
+      {% if let Some(badge) = row.queued %}<a class="st-{{ badge.class }}" href="{{ badge.page }}" title="{{ badge.hint }}">{{ badge.label }}</a>{% endif %}
+      <span>{{ row.kind }}</span>
+      <span>{{ row.date.as_deref().unwrap_or("Date unknown") }}</span>
+      {% for dir in row.owned_in %}<code title="Where you have it">{{ dir }}</code>{% endfor %}
+    </div>
+  </div>
+  <div class="row-side">
+    <a class="btn small" href="{{ row.link }}" target="_blank" rel="noopener">{{ row.link_label }}</a>
+    {% if let Some(path) = row.ignore_path %}
+      {% if row.status == "ignored" %}
+      <button class="small" hx-post="{{ path }}/unignore">Unignore</button>
+      {% else if row.status == "missing" || row.status == "upcoming" %}
+      <button class="small" hx-post="{{ path }}/ignore" title="Leave it out of Missing and the feed">Ignore</button>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>

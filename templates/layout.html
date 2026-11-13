@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}newcut{% endblock %}</title>
+  <link rel="stylesheet" href="{{ crate::web::asset_url("app.css") }}">
+  <link rel="alternate" type="application/atom+xml" title="New releases" href="/feed.atom">
+  {% block feeds %}{% endblock %}
+  <script src="{{ crate::web::asset_url("htmx.min.js") }}" defer></script>
+  <script src="{{ crate::web::asset_url("events.js") }}" data-events-worker="{{ crate::web::asset_url("events-worker.js") }}" defer></script>
+  <script src="{{ crate::web::asset_url("downloads.js") }}" defer></script>
+</head>
+<body hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'>
+  <div class="app">
+    <nav class="topnav">
+      <a href="/" class="brand">newcut</a>
+      <div class="links">
+        <a href="/" data-section="/">Dashboard</a>
+        <a href="/releases?status=missing" data-section="/releases">Latest releases</a>
+        <a href="/artists?status=missing" data-section="/artists">Artists</a>
+        <a href="/missing" data-section="/missing">Missing</a>
+        <a href="/downloads" data-section="/downloads">Downloads</a>
+        <a href="/config" data-section="/config">Config</a>
+        <a href="/feed.atom" class="feed" title="Atom feed of new releases, for your feed reader"><img class="feed-icon" src="{{ crate::web::asset_url("rss.svg") }}" alt="Feed"></a>
+      </div>
+      <div class="nav-search" id="nav-search">
+        <form role="search" action="/artists/search" hx-get="/artists/search" hx-target="#nav-search-results" hx-trigger="submit, input changed delay:400ms from:find input" hx-sync="this:replace">
+          <label class="nav-search-field" title="Find an artist to follow">
+            <svg class="nav-search-icon" viewBox="0 0 19.2758 19.4569" aria-hidden="true"><path d="M8.88178e-16 7.94833C8.88178e-16 12.3359 3.56248 15.8897 7.95006 15.8897C9.57511 15.8897 11.0716 15.3937 12.3191 14.5437L16.8062 19.0411C17.0914 19.3194 17.4636 19.4531 17.8482 19.4531C18.6755 19.4531 19.2758 18.8231 19.2758 18.0064C19.2758 17.6206 19.1302 17.263 18.8722 16.9859L14.4107 12.5157C15.3442 11.2323 15.8897 9.65889 15.8897 7.94833C15.8897 3.56248 12.3359 0 7.95006 0C3.56248 0 8.88178e-16 3.56248 8.88178e-16 7.94833ZM2.03221 7.94833C2.03221 4.67965 4.67965 2.03221 7.95006 2.03221C11.2121 2.03221 13.8662 4.67965 13.8662 7.94833C13.8662 11.2101 11.2121 13.8662 7.95006 13.8662C4.67965 13.8662 2.03221 11.2101 2.03221 7.94833Z" fill="currentColor"/></svg>
+            <input type="search" name="q" placeholder="Find an artist to follow" aria-label="Search MusicBrainz for an artist to follow" autocomplete="off">
+          </label>
+        </form>
+        <div id="nav-search-results" class="nav-search-results" aria-live="polite"></div>
+      </div>
+    </nav>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <div id="toast" class="flash error toast" role="alert" hidden></div>
+  <script>
+    (function () {
+      // A missing album's download page belongs with Missing.
+      var path = location.pathname.replace(/^\/download\//, "/missing/");
+      var current = ["/releases", "/artists", "/missing", "/downloads", "/config"].filter(function (s) {
+        return path.indexOf(s) === 0;
+      })[0] || (path === "/login" ? "" : "/");
+      document.querySelectorAll(".topnav [data-section]").forEach(function (link) {
+        if (link.getAttribute("data-section") === current) link.classList.add("active");
+      });
+
+      // The artist search: open while it has results; Escape or a click
+      // elsewhere closes it.
+      var search = document.getElementById("nav-search");
+      var results = document.getElementById("nav-search-results");
+      function closeSearch() {
+        search.classList.remove("open");
+        results.innerHTML = "";
+        var input = search.querySelector("input");
+        input.value = "";
+        input.blur();
+      }
+      document.body.addEventListener("htmx:afterSwap", function (event) {
+        if (event.detail.target === results) {
+          search.classList.toggle("open", results.innerHTML.trim() !== "");
+        }
+      });
+      document.addEventListener("click", function (event) {
+        if (search.classList.contains("open") && !search.contains(event.target)) closeSearch();
+      });
+      search.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeSearch();
+      });
+
+      // Back links go back (to the list as it was left: its filter, search,
+      // page and scroll) when that's where this page was opened from.
+      document.querySelectorAll("a.back").forEach(function (link) {
+        link.addEventListener("click", function (event) {
+          var from;
+          try { from = new URL(document.referrer); } catch (e) { return; }
+          var to = new URL(link.href);
+          if (from.origin === location.origin && from.pathname === to.pathname && history.length > 1) {
+            event.preventDefault();
+            history.back();
+          }
+        });
+      });
+
+      // htmx drops failed requests silently; say so.
+      var toast = document.getElementById("toast");
+      var timer = null;
+      function fail(text) {
+        toast.textContent = text;
+        toast.hidden = false;
+        clearTimeout(timer);
+        timer = setTimeout(function () { toast.hidden = true; }, 8000);
+      }
+      toast.addEventListener("click", function () { toast.hidden = true; });
+      document.addEventListener("htmx:responseError", function (event) {
+        var xhr = event.detail.xhr;
+        var why = (xhr.responseText || "").trim().slice(0, 300) || xhr.statusText;
+        fail("That didn't work (" + xhr.status + "): " + why);
+      });
+      document.addEventListener("htmx:sendError", function () {
+        fail("Couldn't reach newcut. Is it still running?");
+      });
+      document.addEventListener("htmx:beforeRequest", function () { toast.hidden = true; });
+
+      // Menus close when you click elsewhere, pick an option, or press Escape.
+      function closeMenus(except) {
+        document.querySelectorAll("details.menu[open]").forEach(function (menu) {
+          if (menu !== except) menu.open = false;
+        });
+      }
+      document.addEventListener("click", function (event) {
+        var menu = event.target.closest("details.menu");
+        closeMenus(event.target.closest(".menu-items") ? null : menu);
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeMenus(null);
+      });
+    })();
+  </script>
+</body>
+</html>

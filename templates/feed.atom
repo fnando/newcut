@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>{{ title }}</title>
+  <subtitle>{{ subtitle }}</subtitle>
+  <id>{{ base }}{{ path }}</id>
+  <link rel="self" href="{{ base }}{{ path }}"/>
+  <link rel="alternate" href="{{ base }}{{ page }}"/>
+  <updated>{{ updated }}</updated>
+  <generator>newcut</generator>
+{% for item in items %}
+  <entry>
+    <id>{{ item.id }}</id>
+    <title>{{ item.title }}</title>
+    <link href="{{ item.link }}"/>
+    <updated>{{ item.updated }}</updated>
+    <summary>{{ item.summary }}</summary>
+  </entry>
+{% endfor %}
+</feed>
