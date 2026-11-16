@@ -196,7 +196,7 @@ fn walk(
             Ok(tags) => {
                 report.read += 1;
                 batch.push(ScannedFile {
-                    dir: entry.path().parent().map(display).unwrap_or_default(),
+                    dir: entry.path().parent().map_or_default(display),
                     path,
                     library: name.to_string(),
                     mtime,

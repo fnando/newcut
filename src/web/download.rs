@@ -213,28 +213,11 @@ pub(super) async fn releases(
 
 /// What a release is, in a few words: "CD · US · 2021-03-05 · deluxe".
 pub(super) fn release_label(release: &Release) -> String {
-    [
-        Some(release.formats.clone()).filter(|f| !f.is_empty()),
-        release.country.clone(),
-        release.date.clone(),
-        release.disambiguation.clone(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" · ")
+    matching::release_label(release)
 }
 
-/// A folder's match, to store with its download.
 fn matched(m: &matching::Match, releases: &[Release]) -> downloads::Matched {
-    let release = m.release.map(|i| &releases[i]);
-    downloads::Matched {
-        kind: m.kind.key().into(),
-        release_mbid: release.map(|r| r.mbid.clone()),
-        release_label: release.map(release_label),
-        reason: m.reason.clone(),
-        tracks: m.tracks.clone(),
-    }
+    matching::matched(m, releases)
 }
 
 pub(super) fn off() -> Response {
@@ -279,19 +262,7 @@ pub(super) async fn page(
 /// Soulseek's search trips on (it matches words; punctuation only gets in
 /// the way).
 fn search_text(row: &Row) -> String {
-    format!("{} {}", row.artist, row.title)
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '\'' {
-                c
-            } else {
-                ' '
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    slskd::search_text(&row.artist, &row.title)
 }
 
 #[derive(Deserialize)]
@@ -534,7 +505,7 @@ struct DownloadView {
     match_kind: String,
     release: Option<String>,
     match_reason: Option<String>,
-    /// downloading, failed, manual, filed or handled.
+    /// downloading, failed, manual, filed, handled or cancelled.
     state: String,
     detail: Option<String>,
     filed_to: Option<String>,

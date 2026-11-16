@@ -184,7 +184,7 @@ impl DownloadBadge {
                 "owned",
                 "Tagged and moved into your library; it's yours once scanned",
             ),
-            crate::state::downloads::HANDLED => return None,
+            crate::state::downloads::HANDLED | crate::state::downloads::CANCELLED => return None,
             _ => (
                 "Downloading",
                 "upcoming",

@@ -61,7 +61,7 @@ pub struct File {
 }
 
 /// A folder of audio files someone shares: what a download takes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Folder {
     pub username: String,
     /// The folder's path on the user's side.
@@ -289,6 +289,21 @@ impl Slskd {
         Ok(())
     }
 
+    /// Cancel download `id` (a transfer's) and take it off slskd's list.
+    /// What's been downloaded of it stays where it is.
+    ///
+    /// # Errors
+    ///
+    /// When slskd can't be reached, or won't.
+    pub async fn cancel(&self, username: &str, id: &str) -> anyhow::Result<()> {
+        let mut url = self.url(&["transfers", "downloads", username, id])?;
+        url.query_pairs_mut().append_pair("remove", "true");
+        tracing::debug!("DELETE {url}");
+        // 404: it's gone already.
+        self.send(self.client.delete(url)).await?;
+        Ok(())
+    }
+
     /// What's being (or was) downloaded from `username`.
     ///
     /// # Errors
@@ -321,6 +336,9 @@ struct TransferDir {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transfer {
+    /// slskd's id for it.
+    #[serde(default)]
+    pub id: String,
     pub filename: String,
     /// `Queued, Remotely`, `InProgress`, `Completed, Succeeded`, …
     pub state: String,
@@ -340,6 +358,8 @@ pub struct Progress {
     pub total: usize,
     pub done: usize,
     pub failed: usize,
+    /// Of the failed ones: cancelled (by you, in slskd).
+    pub cancelled: usize,
     pub active: usize,
     pub queued: usize,
     /// Not in slskd (anymore): removed there.
@@ -436,6 +456,7 @@ pub fn progress(files: &[(String, u64)], transfers: &[Transfer]) -> Progress {
             out.transferred += size;
         } else if state.contains("Completed") {
             out.failed += 1;
+            out.cancelled += usize::from(state.contains("Cancelled"));
         } else if state.contains("InProgress") || state.contains("Initializing") {
             out.active += 1;
             out.transferred += transfer.bytes_transferred.min(*size);
@@ -448,6 +469,25 @@ pub fn progress(files: &[(String, u64)], transfers: &[Transfer]) -> Progress {
         }
     }
     out
+}
+
+/// What to search Soulseek for to find `album` by `artist`: their words,
+/// without punctuation (which Soulseek's search doesn't do well with).
+#[must_use]
+pub fn search_text(artist: &str, album: &str) -> String {
+    format!("{artist} {album}")
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '\'' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The audio folders in `responses`, best first: a free upload slot, then
@@ -487,7 +527,7 @@ fn folder(response: &Response, dir: &str, files: &[&File]) -> Folder {
     }
     let mut formats: Vec<(String, usize)> = formats.into_iter().collect();
     formats.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    let main = formats.first().map(|(e, _)| e.clone()).unwrap_or_default();
+    let main = formats.first().map_or_default(|(e, _)| e.clone());
     let lossless = LOSSLESS.contains(&main.as_str());
     let format = formats
         .iter()
@@ -739,6 +779,7 @@ mod tests {
 
     fn transfer(name: &str, state: &str, bytes: u64, at: &str) -> Transfer {
         Transfer {
+            id: String::new(),
             filename: name.into(),
             state: state.into(),
             bytes_transferred: bytes,

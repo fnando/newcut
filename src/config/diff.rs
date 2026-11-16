@@ -23,7 +23,7 @@ fn is_secret(path: &[&str]) -> bool {
         path,
         ["server", "token"]
             | ["notification", "pushover", "app_api_token" | "user_key"]
-            | ["slskd", "api_key"]
+            | ["slskd" | "jellyfin", "api_key"]
     )
 }
 

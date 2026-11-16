@@ -20,7 +20,7 @@ pub struct Download {
     /// The folder slskd puts it in, under its downloads folder (none when
     /// queued before newcut chose).
     pub destination: Option<String>,
-    /// downloading, failed, manual, filed or handled.
+    /// downloading, failed, manual, filed, handled or cancelled.
     pub state: String,
     /// Why it's failed or manual.
     pub detail: Option<String>,
@@ -38,6 +38,8 @@ pub const MANUAL: &str = "manual";
 pub const FILED: &str = "filed";
 /// You dealt with it.
 pub const HANDLED: &str = "handled";
+/// You cancelled it (in slskd too).
+pub const CANCELLED: &str = "cancelled";
 
 /// The release a queued folder matched.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

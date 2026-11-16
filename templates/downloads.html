@@ -24,6 +24,7 @@
           {% else if d.state == "failed" %}<span class="pill st-missing">Download failed</span>{% if let Some(why) = d.detail %}<span>{{ why }}</span>{% endif %}
           {% else if d.state == "filed" %}<span class="pill st-owned">Filed</span>
           {% else if d.state == "handled" %}<span class="pill st-other">Dealt with</span>
+          {% else if d.state == "cancelled" %}<span class="pill st-other">Cancelled</span>
           {% else %}<span class="pill st-upcoming">Downloading</span>{% endif %}
           {% if d.match_kind == "exact" %}<span>Matches {{ d.release.as_deref().unwrap_or_default() }}</span>
           {% else if d.match_kind == "chosen" %}<span>Tagged as {{ d.release.as_deref().unwrap_or_default() }}</span>
@@ -44,6 +45,9 @@
         {% if d.state == "manual" %}
           <button type="button" class="small" hx-post="/downloads/{{ d.id }}/retry" title="File it again as it matched (after you made room, say)">Try again</button>
           <button type="button" class="small" hx-post="/downloads/{{ d.id }}/handled" title="You tagged or moved it yourself">I dealt with it</button>
+        {% endif %}
+        {% if d.state == "downloading" || d.state == "failed" %}
+          <button type="button" class="small" hx-post="/downloads/{{ d.id }}/cancel" hx-confirm="Cancel downloading {{ d.album }} from {{ d.username }}? What's downloaded of it is deleted." title="Cancel it in slskd, and delete what's downloaded">Cancel</button>
         {% endif %}
         <button type="button" class="small" hx-post="/download/{{ d.key }}/downloads/{{ d.id }}/forget" hx-on::after-request="location.reload()" title="Stop listing it (slskd and the files are left alone)">Forget</button>
       </div>

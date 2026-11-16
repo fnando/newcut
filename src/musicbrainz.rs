@@ -32,7 +32,7 @@ pub struct ArtistHit {
 }
 
 /// A release (an edition of a release group) and its tracklist.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Release {
     pub mbid: String,
     pub title: String,
@@ -48,7 +48,7 @@ pub struct Release {
 }
 
 /// A track on a release.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReleaseTrack {
     /// The track's id (`MUSICBRAINZ_RELEASETRACKID`).
     pub mbid: String,

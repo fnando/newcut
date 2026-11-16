@@ -63,6 +63,8 @@ pub struct Config {
     #[serde(default)]
     pub slskd: SlskdConfig,
     #[serde(default)]
+    pub jellyfin: JellyfinConfig,
+    #[serde(default)]
     pub schedule: ScheduleConfig,
     #[serde(default)]
     pub notification: NotificationConfig,
@@ -283,6 +285,23 @@ pub struct SlskdConfig {
     /// release's), `release_year`, `country`, `media`, `label`,
     /// `catalog_number`, `type`, `releaseid`, `releasegroupid`.
     pub output_dir: Option<String>,
+}
+
+/// Jellyfin: told to look at the albums newcut files, so they show up
+/// there right away.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct JellyfinConfig {
+    pub enabled: bool,
+    /// Jellyfin's web address.
+    pub server: String,
+    /// An API key (Dashboard → API Keys), or `"$NAME"` to read it from
+    /// that environment variable.
+    pub api_key: String,
+    /// How Jellyfin sees your folders, when it isn't as newcut does: each
+    /// folder of newcut's (`~` and `$VAR` are expanded) to the same folder
+    /// in Jellyfin, e.g. `{ "/Volumes/storage/media/music" = "/data/music" }`.
+    pub paths: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for SlskdConfig {

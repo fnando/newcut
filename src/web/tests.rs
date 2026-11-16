@@ -1392,3 +1392,85 @@ async fn ignore_all_missing_is_per_type() {
     let (_, _, body) = call(&s.web, get("/missing").body(Body::empty()).unwrap()).await;
     assert!(body.contains("Missing &#60;Two&#62;"), "{body}");
 }
+
+#[tokio::test]
+async fn downloads_can_be_cancelled() {
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let s = setup(None);
+    let root = s._dir.path();
+    let slskd = MockServer::start().await;
+    {
+        let state = Db::open(&s.web.db).unwrap();
+        let config = format!(
+            "version = 1\nlibraries = [{lib:?}]\n\
+             [slskd]\nenabled = true\napi_key = \"k\"\nserver = {url:?}\n\
+             downloads_dir = {dl:?}\noutput_dir = \"{lib}/%{{artist}}/%{{album}}\"\n",
+            lib = root.join("music").display().to_string(),
+            dl = root.join("slskd").display().to_string(),
+            url = slskd.uri(),
+        );
+        revisions::add(&state.conn, &config, "file", jiff::Timestamp::now()).unwrap();
+        crate::state::downloads::add(
+            &state.conn,
+            &crate::state::downloads::NewDownload {
+                release_key: GROUP_MISSING,
+                username: "someone",
+                dir: "x\\Missing Two",
+                files: &[
+                    ("x\\Missing Two\\01.flac".to_string(), 1),
+                    ("x\\Missing Two\\02.flac".to_string(), 1),
+                ],
+                matched: &crate::state::downloads::Matched::default(),
+                destination: Some("newcut/abc"),
+            },
+            jiff::Timestamp::now(),
+        )
+        .unwrap();
+    }
+    let folder = root.join("slskd/newcut/abc");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("01.flac"), b"done").unwrap();
+    Mock::given(method("GET"))
+        .and(path("/api/v0/transfers/downloads/someone"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "directories": [{ "files": [
+                { "id": "t1", "filename": "x\\Missing Two\\01.flac", "size": 1,
+                  "state": "Completed, Succeeded" },
+                { "id": "t2", "filename": "x\\Missing Two\\02.flac", "size": 1,
+                  "state": "InProgress" },
+                { "id": "t3", "filename": "y\\Other\\01.flac", "size": 1,
+                  "state": "InProgress" },
+            ]}]
+        })))
+        .mount(&slskd)
+        .await;
+    for id in ["t1", "t2"] {
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v0/transfers/downloads/someone/{id}")))
+            .and(query_param("remove", "true"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&slskd)
+            .await;
+    }
+    let (_, _, body) = call(&s.web, get("/downloads").body(Body::empty()).unwrap()).await;
+    assert!(body.contains("hx-post=\"/downloads/1/cancel\""), "{body}");
+
+    let (status, headers, _) = call(&s.web, post(&s.web, "/downloads/1/cancel")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(headers["hx-refresh"], "true");
+    assert!(!folder.exists(), "what was downloaded is gone");
+    let (_, _, body) = call(&s.web, get("/downloads").body(Body::empty()).unwrap()).await;
+    assert!(body.contains("Cancelled"), "{body}");
+    assert!(!body.contains("hx-post=\"/downloads/1/cancel\""), "{body}");
+    let (_, _, body) = call(
+        &s.web,
+        get(&format!("/artists/{ARTIST}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert!(!body.contains("Downloading"), "no badge: {body}");
+}

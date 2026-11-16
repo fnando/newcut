@@ -18,6 +18,9 @@ pub struct Loaded {
     /// Where slskd's downloads are and where tagged ones go, when both are
     /// set (and slskd's on).
     pub import: Option<ImportPaths>,
+    /// `jellyfin.paths`, expanded: a folder of newcut's, and the same
+    /// folder in Jellyfin.
+    pub jellyfin_paths: Vec<(PathBuf, String)>,
     /// Fine to run with, but worth a look (a library that isn't there).
     pub warnings: Vec<String>,
 }
@@ -50,13 +53,10 @@ impl Loaded {
 /// Every problem found, as `origin:line:col: message` (or `origin: message`).
 pub fn check_text(text: &str, origin: &str, home: &Path) -> Result<Loaded, Vec<String>> {
     let config: Config = toml::from_str(text).map_err(|e| {
-        let at = e
-            .span()
-            .map(|span| {
-                let (line, col) = line_col(text, span.start);
-                format!(":{line}:{col}")
-            })
-            .unwrap_or_default();
+        let at = e.span().map_or_default(|span| {
+            let (line, col) = line_col(text, span.start);
+            format!(":{line}:{col}")
+        });
         vec![format!("{origin}{at}: {}", e.message().trim())]
     })?;
     let mut errors = Vec::new();
@@ -124,6 +124,7 @@ pub fn check_text(text: &str, origin: &str, home: &Path) -> Result<Loaded, Vec<S
     }
     check_covers(&config.covers, &mut error);
     let import = check_slskd(&config.slskd, home, origin, &mut error, &mut warnings);
+    let jellyfin_paths = check_jellyfin(&config.jellyfin, home, origin, &mut error, &mut warnings);
     let schedule = &config.schedule;
     for (key, every) in [
         ("schedule.scan", schedule.scan),
@@ -144,11 +145,66 @@ pub fn check_text(text: &str, origin: &str, home: &Path) -> Result<Loaded, Vec<S
             libraries,
             notify_bin,
             import,
+            jellyfin_paths,
             warnings,
         })
     } else {
         Err(errors)
     }
+}
+
+/// `[jellyfin]`: its address, an API key, and full paths to map.
+fn check_jellyfin(
+    jellyfin: &super::JellyfinConfig,
+    home: &Path,
+    origin: &str,
+    error: &mut impl FnMut(String),
+    warnings: &mut Vec<String>,
+) -> Vec<(PathBuf, String)> {
+    let mut paths = Vec::new();
+    for (local, theirs) in &jellyfin.paths {
+        match crate::paths::expand(local, home) {
+            Ok(path) if path.is_absolute() => {}
+            Ok(_) => {
+                error(format!(
+                    "jellyfin.paths: {local:?} must be a full path: start with /, ~ or $VAR"
+                ));
+                continue;
+            }
+            Err(e) => {
+                error(format!("jellyfin.paths: {e}"));
+                continue;
+            }
+        }
+        if theirs.trim().is_empty() {
+            error(format!(
+                "jellyfin.paths: {local:?} needs Jellyfin's path for it"
+            ));
+            continue;
+        }
+        if let Ok(path) = crate::paths::expand(local, home) {
+            paths.push((path, theirs.trim_end_matches('/').to_string()));
+        }
+    }
+    if !jellyfin.enabled {
+        return paths;
+    }
+    if !(jellyfin.server.starts_with("http://") || jellyfin.server.starts_with("https://")) {
+        error(format!(
+            "jellyfin.server: {:?} isn't an http(s) URL",
+            jellyfin.server
+        ));
+    }
+    if jellyfin.api_key.trim().is_empty() {
+        error("jellyfin.api_key: required to use Jellyfin".into());
+    } else if let Some(name) = super::secret::env_name(&jellyfin.api_key)
+        && super::secret::resolve(&jellyfin.api_key).is_none()
+    {
+        warnings.push(format!(
+            "{origin}: jellyfin.api_key: ${name} isn't set, so Jellyfin can't be told about new albums"
+        ));
+    }
+    paths
 }
 
 /// `[covers]`: plain file names.
@@ -385,11 +441,12 @@ fn readable_secret(path: &Path, loaded: &Loaded) -> Option<String> {
     let pushover = config.notification.pushover.as_ref();
     let secrets = config.server.token.as_deref().is_some_and(literal)
         || pushover.is_some_and(|p| literal(&p.app_api_token) || literal(&p.user_key))
-        || literal(&config.slskd.api_key);
+        || literal(&config.slskd.api_key)
+        || literal(&config.jellyfin.api_key);
     let mode = std::fs::metadata(path).ok()?.permissions().mode();
     (secrets && mode & 0o077 != 0).then(|| {
         format!(
-            "{0}: it has secrets (server.token, Pushover's keys or slskd.api_key) and other users can read it; \
+            "{0}: it has secrets (server.token, Pushover's keys, slskd.api_key or jellyfin.api_key) and other users can read it; \
              run `chmod 600 {0}`, or write them as \"$NAME\" and set those variables",
             path.display()
         )

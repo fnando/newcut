@@ -160,6 +160,7 @@ pub fn router(web: Arc<Web>) -> Router {
         .route("/downloads", get(downloads::page))
         .route("/downloads/{id}/releases", get(downloads::releases))
         .route("/downloads/{id}/file", post(downloads::file))
+        .route("/downloads/{id}/cancel", post(downloads::cancel))
         .route("/downloads/{id}/{action}", post(downloads::action))
         .route("/download/{key}", get(download::page))
         .route("/download/{key}/searches", post(download::start))
@@ -1152,9 +1153,7 @@ async fn config_page(
 ) -> Result<Html<String>, WebError> {
     let (rev, text, history) = web
         .db(|conn, rev, _| {
-            let text = revisions::get(conn, rev)?
-                .map(|r| r.text)
-                .unwrap_or_default();
+            let text = revisions::get(conn, rev)?.map_or_default(|r| r.text);
             Ok((rev, text, revisions::list(conn, 50)?))
         })
         .await?;
@@ -1177,9 +1176,7 @@ fn check(web: &Web, text: &str) -> Result<Loaded, String> {
 async fn compare(web: &Arc<Web>, edited: &str) -> Result<(ConfigResult, String), WebError> {
     let (rev, current, loaded) = web
         .db(|conn, rev, loaded| {
-            let text = revisions::get(conn, rev)?
-                .map(|r| r.text)
-                .unwrap_or_default();
+            let text = revisions::get(conn, rev)?.map_or_default(|r| r.text);
             Ok((rev, text, loaded.clone()))
         })
         .await?;
@@ -1259,9 +1256,7 @@ async fn revision_page(
             let Some(revision) = revisions::get(conn, rev)? else {
                 return Ok(None);
             };
-            let current_text = revisions::get(conn, current)?
-                .map(|r| r.text)
-                .unwrap_or_default();
+            let current_text = revisions::get(conn, current)?.map_or_default(|r| r.text);
             Ok(Some((revision, current, current_text, loaded.clone())))
         })
         .await?;
@@ -1271,8 +1266,7 @@ async fn revision_page(
     // What rolling back would change (nothing to say when it no longer
     // checks out: rolling back refuses then).
     let changes = check(&web, &revision.text)
-        .map(|old| crate::config::diff::config_changes(&loaded.config, &old.config))
-        .unwrap_or_default();
+        .map_or_default(|old| crate::config::diff::config_changes(&loaded.config, &old.config));
     let diff = if revision.rev == current {
         String::new()
     } else {
@@ -1456,9 +1450,7 @@ fn asset_tag(body: &str) -> String {
 /// An asset's address, which changes with its contents, so browsers never
 /// use a copy from an older build.
 pub(crate) fn asset_url(file: &str) -> String {
-    let tag = asset_file(file)
-        .map(|(body, _)| asset_tag(body))
-        .unwrap_or_default();
+    let tag = asset_file(file).map_or_default(|(body, _)| asset_tag(body));
     format!("/assets/{file}?v={tag}")
 }
 

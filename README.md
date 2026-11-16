@@ -150,6 +150,29 @@ scanned. The rest wait on the Downloads page: tag one as a release you pick
 `%{media}`, `%{label}`, `%{catalog_number}`, `%{type}`, `%{releaseid}` and
 `%{releasegroupid}`.
 
+When a download fails (slskd couldn't get every file), the importer searches
+Soulseek again and queues the best folder that's lossless, matches one of the
+album's releases exactly, and wasn't tried for it before. After 3 failures of
+the same album, or when nothing else will do, it tells you instead. Downloads
+you cancelled, or took off slskd's list, aren't replaced.
+
+A download that's still going (or failed) can be cancelled from the
+Downloads page or the album's: its files are cancelled in slskd, and the
+folder newcut had slskd put them in is deleted.
+
+To have [Jellyfin](https://jellyfin.org) scan the albums newcut files right
+away, give it Jellyfin's address and an API key (Dashboard → API Keys). When
+Jellyfin sees your folders under other paths (it runs in a container, say),
+map them in `paths`:
+
+```toml
+[jellyfin]
+enabled = true
+server = "http://localhost:8096"
+api_key = "$JELLYFIN_API_KEY"
+paths = { "/Volumes/storage/media/music" = "/data/music" }
+```
+
 Editors that understand `#:schema` (VS Code with Even Better TOML, Zed,
 Helix, …) check and complete it as you type; `newcut config schema` prints
 the schema.
@@ -251,7 +274,8 @@ what the New list has (out within `schedule.new_window`, or coming), and with
 `[notification] strategy = "all"`, the ones you already have too.
 
 A download that needs you (it isn't an exact match, its files aren't
-where slskd should have put them, its place in your library is taken, …) is
+where slskd should have put them, its place in your library is taken, it
+failed and there's no other source, …) is
 told right away, once: "A download needs you", with the album and why, and
 the Downloads page as its link. The command gets those with `"kind":
 "download"` (and a `download` object: `album`, `artist`,

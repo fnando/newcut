@@ -352,7 +352,14 @@ impl Work<'_> {
                 continue;
             }
             if progress.status() != "ok" {
-                set(FAILED, Some(&progress.label()), None)?;
+                // Failed (not cancelled, nor taken off slskd's list: that's
+                // you): another source, if there's one.
+                let just_failed = set(FAILED, Some(&progress.label()), None)?
+                    && progress.status() == "failed"
+                    && progress.cancelled == 0;
+                if just_failed && let Some(why) = self.replace(&client, &download).await? {
+                    needs_you.push(download_note(&self.state.conn, &download, why)?);
+                }
                 continue;
             }
             self.report.working(format!(
@@ -384,6 +391,19 @@ impl Work<'_> {
                 }
             }
         }
+        self.after_filing(filed_dirs).await?;
+        let told = self.tell_about_downloads(needs_you).await;
+        let summary = import_summary(filed, manual, downloading, unknown, told);
+        Ok((summary, filed))
+    }
+
+    /// The album folders just filed (with their release groups): told to
+    /// Jellyfin, and scanned.
+    async fn after_filing(&mut self, filed_dirs: Vec<(String, String)>) -> anyhow::Result<()> {
+        use crate::state::downloads::FILED;
+        // Jellyfin first: scanning ours takes a while.
+        let dirs: Vec<std::path::PathBuf> = filed_dirs.iter().map(|(_, d)| d.into()).collect();
+        crate::jellyfin::tell(self.loaded, &dirs).await;
         // Scanned now (not at the next full scan): it's yours right away.
         for (key, dir) in filed_dirs {
             crate::scan::scan_new_album(
@@ -397,9 +417,83 @@ impl Work<'_> {
                 state: FILED.into(),
             });
         }
-        let told = self.tell_about_downloads(needs_you).await;
-        let summary = import_summary(filed, manual, downloading, unknown, told);
-        Ok((summary, filed))
+        Ok(())
+    }
+
+    /// Download `failed` failed: queue another source for its album (the
+    /// best untried lossless exact match a new search finds). Returns why
+    /// that didn't happen, when it should be told.
+    async fn replace(
+        &mut self,
+        client: &crate::slskd::Slskd,
+        failed: &crate::state::downloads::Download,
+    ) -> anyhow::Result<Option<String>> {
+        use crate::state::downloads::{self, FAILED};
+        let key = &failed.release_key;
+        let all = downloads::for_release(&self.state.conn, key)?;
+        if all.iter().any(|d| d.id > failed.id) {
+            // Another's been queued since.
+            return Ok(None);
+        }
+        let failures = all.iter().filter(|d| d.state == FAILED).count();
+        if failures >= crate::fallback::MAX_FAILURES {
+            return Ok(Some(format!(
+                "its download failed {failures} times; pick another source yourself"
+            )));
+        }
+        let Some((album, artist)) = library::release_group_title(&self.state.conn, key)? else {
+            return Ok(None);
+        };
+        let tried: Vec<(String, String)> = all
+            .iter()
+            .map(|d| (d.username.clone(), d.dir.clone()))
+            .collect();
+        self.report
+            .working(format!("looking for another source of {album}"));
+        let shutdown = self.shutdown.clone();
+        let search = crate::fallback::Search {
+            client,
+            http: self.http,
+            musicbrainz_server: &self.loaded.config.musicbrainz.server,
+            key,
+            artist: artist.as_deref().unwrap_or_default(),
+            album: &album,
+            tried: &tried,
+            filing: self.loaded.import.is_some(),
+        };
+        let queued = match crate::fallback::queue_another(&search, &|| shutdown.is_stopping()).await
+        {
+            Ok(Some(queued)) => queued,
+            Ok(None) => {
+                return Ok(Some(
+                    "its download failed, and Soulseek has no other lossless folder that matches exactly"
+                        .into(),
+                ));
+            }
+            Err(e) => {
+                tracing::warn!("another source for {album}: {e:#}");
+                return Ok(Some(format!(
+                    "its download failed, and looking for another source did too: {e:#}"
+                )));
+            }
+        };
+        downloads::add(
+            &self.state.conn,
+            &downloads::NewDownload {
+                release_key: key,
+                username: &queued.folder.username,
+                dir: &queued.folder.dir,
+                files: &queued.folder.files,
+                matched: &queued.matched,
+                destination: queued.destination.as_deref(),
+            },
+            Timestamp::now(),
+        )?;
+        emit(Event::Download {
+            key: key.clone(),
+            state: downloads::DOWNLOADING.into(),
+        });
+        Ok(None)
     }
 
     /// Tell you (through every notification channel that's on) about each
@@ -692,5 +786,151 @@ mod tests {
         let (summary, _) = work.import().await.unwrap();
         assert!(!summary.contains("told you"), "{summary}");
         assert_eq!(std::fs::read_to_string(&got).unwrap().lines().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_download_is_replaced_by_another_source() {
+        use wiremock::matchers::body_partial_json;
+        let dir = tempfile::tempdir().unwrap();
+        // slskd and MusicBrainz both.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v0/transfers/downloads/someone"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "directories": [{ "files": [{
+                    "id": "t1", "filename": "x\\Album\\01.flac", "size": 1,
+                    "state": "Completed, Errored"
+                }]}]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v0/searches"))
+            .and(body_partial_json(
+                serde_json::json!({ "searchText": "The Artist The Album" }),
+            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": "s2" })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v0/searches/s2"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "isComplete": true })),
+            )
+            .mount(&server)
+            .await;
+        let flac = |dir: &str| serde_json::json!({ "filename": format!("{dir}\\01 One.flac"), "size": 1, "length": 200 });
+        Mock::given(method("GET"))
+            .and(path("/api/v0/searches/s2/responses"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                // Tried already.
+                { "username": "someone", "hasFreeUploadSlot": true, "files": [flac("x\\Album")] },
+                { "username": "lossy", "hasFreeUploadSlot": true, "files": [
+                    { "filename": "z\\Album\\01 One.mp3", "size": 1, "length": 200 }] },
+                { "username": "other", "files": [flac("y\\Album")] },
+            ])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v0/transfers/downloads/batches"))
+            .and(body_partial_json(
+                serde_json::json!({ "username": "other" }),
+            ))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(serde_json::json!({ "failures": [] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/ws/2/release"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "release-count": 1, "releases": [{
+                    "id": "22222222-0000-4000-8000-000000000001", "title": "The Album",
+                    "media": [{ "position": 1, "format": "CD", "tracks": [
+                        { "id": "track-1", "position": 1, "title": "One", "length": 200_000,
+                          "recording": { "id": "rec-1" } }]}]
+                }]
+            })))
+            .mount(&server)
+            .await;
+        let config = format!(
+            "version = 1\n[musicbrainz]\nserver = {0:?}\n\
+             [slskd]\nenabled = true\nserver = {0:?}\napi_key = \"k\"\n\
+             downloads_dir = {1:?}\noutput_dir = \"{2}/music/%{{album}}\"\n",
+            server.uri(),
+            dir.path().display().to_string(),
+            dir.path().display(),
+        );
+        let loaded = crate::config::check_text(&config, "test", dir.path()).unwrap();
+        let mut state = State::open_in_memory().unwrap();
+        let now = Timestamp::now();
+        library::upsert_release_group(
+            &state.conn,
+            &library::NewReleaseGroup {
+                mbid: GROUP.into(),
+                title: "The Album".into(),
+                artist_credit: Some("The Artist".into()),
+                primary_type: Some("Album".into()),
+                ..library::NewReleaseGroup::default()
+            },
+            "musicbrainz",
+            now,
+        )
+        .unwrap();
+        downloads::add(
+            &state.conn,
+            &downloads::NewDownload {
+                release_key: GROUP,
+                username: "someone",
+                dir: "x\\Album",
+                files: &[("x\\Album\\01.flac".into(), 1)],
+                matched: &downloads::Matched::default(),
+                destination: Some("newcut/a"),
+            },
+            now,
+        )
+        .unwrap();
+        let http = Http::new(None);
+        let report = Reporter {
+            service: "importer",
+        };
+        let shutdown = Shutdown::default();
+        let mut work = Work {
+            state: &mut state,
+            loaded: &loaded,
+            http: &http,
+            report: &report,
+            shutdown: &shutdown,
+        };
+        work.import().await.unwrap();
+        let all = downloads::for_release(&work.state.conn, GROUP).unwrap();
+        let (old, new): (Vec<_>, Vec<_>) = all.iter().partition(|d| d.id == 1);
+        assert_eq!(old[0].state, downloads::FAILED);
+        assert_eq!(new.len(), 1, "{all:?}");
+        assert_eq!(new[0].username, "other");
+        assert_eq!(new[0].dir, "y\\Album");
+        assert_eq!(new[0].state, downloads::DOWNLOADING);
+        assert_eq!(new[0].matched.kind, "exact");
+        assert!(
+            new[0]
+                .destination
+                .as_deref()
+                .unwrap()
+                .starts_with("newcut/")
+        );
+
+        // Once: the next run leaves it be (the new one isn't in slskd's
+        // list here, which isn't a failure to replace).
+        work.import().await.unwrap();
+        assert_eq!(
+            downloads::for_release(&work.state.conn, GROUP)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 }

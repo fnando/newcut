@@ -14,7 +14,7 @@
           {% else %}<span class="pill st-other">Not matched</span>{% endif %}
         </div>
         <div class="meta">
-          <span class="pill {% match d.status %}{% when Some("ok") %}st-owned{% when Some("active") %}st-upcoming{% when Some("queued") %}st-other{% when Some(_) %}st-missing{% when None %}st-other{% endmatch %}">{{ d.label }}</span>
+          {% if d.state != "cancelled" %}<span class="pill {% match d.status %}{% when Some("ok") %}st-owned{% when Some("active") %}st-upcoming{% when Some("queued") %}st-other{% when Some(_) %}st-missing{% when None %}st-other{% endmatch %}">{{ d.label }}</span>{% endif %}
           <span>{{ d.tracks }} track{% if d.tracks != 1 %}s{% endif %}</span>
           <span>{{ d.size }}</span>
           {% if let Some(speed) = d.speed %}<span>{{ speed }}</span>{% endif %}
@@ -22,11 +22,15 @@
         </div>
         {% if d.state == "filed" %}<div class="meta"><span class="pill st-owned">Filed</span>{% if let Some(to) = d.filed_to %}<code>{{ to }}</code>{% endif %}</div>
         {% else if d.state == "manual" %}<div class="meta"><a class="pill st-missing" href="/downloads">Needs you</a>{% if let Some(why) = d.detail %}<span>{{ why }}</span>{% endif %}</div>
-        {% else if d.state == "handled" %}<div class="meta"><span class="pill st-other">Dealt with</span></div>{% endif %}
+        {% else if d.state == "handled" %}<div class="meta"><span class="pill st-other">Dealt with</span></div>
+        {% else if d.state == "cancelled" %}<div class="meta"><span class="pill st-other">Cancelled</span></div>{% endif %}
         {% if d.status == Some("active") %}<div class="bar st-downloading download-bar"><span style="width: {{ d.percent }}%"></span></div>{% endif %}
         <div class="meta"><span>{{ d.username }}</span><code title="{{ d.dir }}">{{ d.dir }}</code></div>
       </div>
       <div class="row-side">
+        {% if d.state == "downloading" || d.state == "failed" %}
+        <button type="button" class="small" hx-post="/downloads/{{ d.id }}/cancel" hx-confirm="Cancel this download? What's downloaded of it is deleted." title="Cancel it in slskd, and delete what's downloaded">Cancel</button>
+        {% endif %}
         <button type="button" class="small" hx-post="/download/{{ key }}/downloads/{{ d.id }}/forget" title="Stop listing it here (slskd keeps it)">Forget</button>
       </div>
     </div>

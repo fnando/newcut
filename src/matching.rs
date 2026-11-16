@@ -292,6 +292,34 @@ fn clock(seconds: u64) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
+/// What a release is, in a few words: "CD · US · 2021-03-05 · deluxe".
+#[must_use]
+pub fn release_label(release: &Release) -> String {
+    [
+        Some(release.formats.clone()).filter(|f| !f.is_empty()),
+        release.country.clone(),
+        release.date.clone(),
+        release.disambiguation.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ")
+}
+
+/// A folder's match (against `releases`), to store with its download.
+#[must_use]
+pub fn matched(m: &Match, releases: &[Release]) -> crate::state::downloads::Matched {
+    let release = m.release.map(|i| &releases[i]);
+    crate::state::downloads::Matched {
+        kind: m.kind.key().into(),
+        release_mbid: release.map(|r| r.mbid.clone()),
+        release_label: release.map(release_label),
+        reason: m.reason.clone(),
+        tracks: m.tracks.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

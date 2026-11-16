@@ -29,6 +29,15 @@
         "secondary_types": []
       }
     },
+    "jellyfin": {
+      "$ref": "#/$defs/JellyfinConfig",
+      "default": {
+        "api_key": "",
+        "enabled": false,
+        "paths": {},
+        "server": ""
+      }
+    },
     "libraries": {
       "description": "Music folders to scan (`~` and `$VAR` are expanded).",
       "type": "array",
@@ -191,6 +200,35 @@
       "description": "A duration such as \"6h\", \"7d\" or \"1h30m\"",
       "type": "string",
       "pattern": "^([0-9]+[smhdw])+$"
+    },
+    "JellyfinConfig": {
+      "description": "Jellyfin: told to look at the albums newcut files, so they show up\nthere right away.",
+      "type": "object",
+      "properties": {
+        "api_key": {
+          "description": "An API key (Dashboard → API Keys), or `\"$NAME\"` to read it from\nthat environment variable.",
+          "type": "string",
+          "default": ""
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "paths": {
+          "description": "How Jellyfin sees your folders, when it isn't as newcut does: each\nfolder of newcut's (`~` and `$VAR` are expanded) to the same folder\nin Jellyfin, e.g. `{ \"/Volumes/storage/media/music\" = \"/data/music\" }`.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "server": {
+          "description": "Jellyfin's web address.",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
     },
     "ListenBrainzConfig": {
       "type": "object",

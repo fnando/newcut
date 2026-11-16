@@ -77,7 +77,7 @@ pub(crate) async fn run(app: &Arc<App>) -> anyhow::Result<i32> {
         Ok(held) => held,
         Err(LockError::Held { pid }) => bail!(
             "another newcut daemon is running{}",
-            pid.map(|p| format!(" (pid {p})")).unwrap_or_default()
+            pid.map_or_default(|p| format!(" (pid {p})"))
         ),
         Err(e) => return Err(e.into()),
     };

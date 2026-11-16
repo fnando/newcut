@@ -71,6 +71,19 @@ api_key = "$SLSKD_API_KEY"
 # %{releasegroupid}.
 # downloads_dir = "/srv/slskd/downloads"
 # output_dir = "~/Music/%{artist}/%{album} (%{year})"
+# A download that fails is replaced by the best untried folder that's
+# lossless and matches a release exactly (up to 3 failures per album).
+
+[jellyfin]
+# Tell Jellyfin (https://jellyfin.org) about the albums newcut files, so it
+# scans them right away.
+enabled = false
+server = "http://localhost:8096"
+# An API key (Dashboard → API Keys); "$NAME" reads it from that variable.
+api_key = "$JELLYFIN_API_KEY"
+# How Jellyfin sees your folders, when it isn't as newcut does (it runs in
+# a container, say): a folder of newcut's to the same folder in Jellyfin.
+# paths = { "/Volumes/storage/media/music" = "/data/music" }
 
 [schedule]
 # Scan the libraries.

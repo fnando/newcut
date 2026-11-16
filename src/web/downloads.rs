@@ -14,7 +14,9 @@ use super::download::{Setup, setup};
 use super::{Web, WebError, not_found, refresh, render};
 use crate::daemon::service::{Service, local};
 use crate::matching::{self, Candidate};
-use crate::state::downloads::{self, Download, FILED, HANDLED, MANUAL};
+use crate::state::downloads::{
+    self, CANCELLED, DOWNLOADING, Download, FAILED, FILED, HANDLED, MANUAL,
+};
 
 #[derive(Template)]
 #[template(path = "downloads.html")]
@@ -123,7 +125,7 @@ pub(super) async fn page(State(web): State<Arc<Web>>) -> Result<Response, WebErr
         },
         Section {
             title: "Dealt with",
-            hint: "You said you took care of these",
+            hint: "You took care of these, or cancelled them",
             rows: Vec::new(),
         },
     ];
@@ -131,7 +133,7 @@ pub(super) async fn page(State(web): State<Arc<Web>>) -> Result<Response, WebErr
         let i = match d.state.as_str() {
             MANUAL => 0,
             FILED => 2,
-            HANDLED => 3,
+            HANDLED | CANCELLED => 3,
             _ => 1,
         };
         sections[i].rows.push(row(d));
@@ -226,9 +228,9 @@ pub(super) async fn file(
         return Ok(super::download::off());
     };
     let found = web
-        .db(move |conn, _, loaded| Ok((downloads::get(conn, id)?, loaded.import.clone())))
+        .db(move |conn, _, loaded| Ok((downloads::get(conn, id)?, loaded.clone())))
         .await?;
-    let (Some(download), Some(paths)) = found else {
+    let (Some(download), Some(paths)) = (found.0, found.1.import.clone()) else {
         return Ok(not_found(
             "such download, or slskd.downloads_dir and output_dir",
         ));
@@ -290,6 +292,7 @@ pub(super) async fn file(
     .await?;
     super::download::announce(&key, if filed_to.is_some() { FILED } else { MANUAL });
     if let Some(dir) = filed_to {
+        crate::jellyfin::tell(&found.1, std::slice::from_ref(&dir)).await;
         // Its folder now (not at the next full scan): it's yours right away.
         let path = web.db.clone();
         let home = web.dirs.home.clone();
@@ -305,6 +308,69 @@ pub(super) async fn file(
         super::download::announce(&key, FILED);
         web.wakes.wake(Service::Resolver);
     }
+    Ok(refresh())
+}
+
+/// Cancel download `id` (still downloading, or failed): its files in
+/// slskd, and the folder newcut had slskd put them in.
+pub(super) async fn cancel(
+    State(web): State<Arc<Web>>,
+    Path(id): Path<i64>,
+) -> Result<Response, WebError> {
+    let Some(Setup { slskd: config, .. }) = setup(&web).await? else {
+        return Ok(super::download::off());
+    };
+    let found = web
+        .db(move |conn, _, loaded| Ok((downloads::get(conn, id)?, loaded.import.clone())))
+        .await?;
+    let (Some(download), paths) = found else {
+        return Ok(not_found("such download"));
+    };
+    if download.state != DOWNLOADING && download.state != FAILED {
+        return Ok(refresh());
+    }
+    let cancelled = async {
+        let client = crate::slskd::Slskd::new(&config)?;
+        let transfers = client.transfers(&download.username).await?;
+        let mut n = 0;
+        for transfer in transfers
+            .iter()
+            .filter(|t| download.files.iter().any(|(f, _)| *f == t.filename))
+        {
+            client.cancel(&download.username, &transfer.id).await?;
+            n += 1;
+        }
+        Ok::<_, anyhow::Error>(n)
+    }
+    .await;
+    let n = match cancelled {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!("cancelling {}: {e:#}", download.dir);
+            return Ok(
+                (axum::http::StatusCode::BAD_GATEWAY, format!("slskd: {e:#}")).into_response(),
+            );
+        }
+    };
+    tracing::info!("cancelled {n} files of {} in slskd", download.dir);
+    // The folder newcut picked for it: nothing else is in there.
+    if let (Some(paths), Some(destination)) = (paths, download.destination.as_deref())
+        && destination.starts_with("newcut/")
+    {
+        let dir = paths.downloads.join(destination);
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => tracing::info!("removed {}", dir.display()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!("can't remove {}: {e}", dir.display()),
+        }
+    }
+    let key = download.release_key.clone();
+    web.db(move |conn, _, _| {
+        downloads::set_state(conn, id, CANCELLED, None, None, jiff::Timestamp::now())?;
+        Ok(())
+    })
+    .await?;
+    super::download::announce(&key, CANCELLED);
     Ok(refresh())
 }
 
