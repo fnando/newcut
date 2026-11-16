@@ -1,7 +1,7 @@
 {% if let Some(error) = error %}<p class="flash error">{{ error }}</p>
 {% else %}
 <form hx-post="/downloads/{{ id }}/file" hx-target="this" hx-disabled-elt="find button" class="tag-as-form">
-  <p class="hint">Its {{ files }} file{% if files != 1 %}s{% endif %} become the release's tracks in order (by the numbers their names start with), whatever their lengths.</p>
+  <p class="hint">Its {{ files }} file{% if files != 1 %}s{% endif %} become the release's tracks, whatever their lengths: in order (by the numbers their names start with) when it has as many; by the titles (or numbers) in their names when it has more. Files that never came are left out.</p>
   {% for r in releases %}
   <label class="tag-as-option{% if !r.fits %} dim{% endif %}">
     <input type="radio" name="release" value="{{ r.mbid }}" required{% if !r.fits %} disabled{% endif %}{% if r.current && r.fits %} checked{% endif %}>

@@ -179,6 +179,8 @@ pub struct Filing<'a> {
     pub release: &'a ReleaseInfo,
     /// `slskd.output_dir`.
     pub template: &'a str,
+    /// File the files that are there (some never came): you said so.
+    pub partial: bool,
 }
 
 /// File a finished download: tagged as the release it matched, and moved
@@ -233,6 +235,7 @@ pub async fn file_download(
         tracks: &download.matched.tracks,
         release: &info,
         template: &paths.output,
+        partial: forced,
     })?;
     save_cover(http, &info.mbid, &dir).await;
     Ok(dir)
@@ -265,8 +268,9 @@ async fn save_cover(http: &crate::http::Http, release: &str, dir: &Path) {
 
 /// Tag and move a download's files; returns the album's folder.
 ///
-/// Nothing is moved unless every file is there, has its track, and its
-/// place is free; a file that can't be tagged stops it before any move.
+/// Nothing is moved unless every file is there (with `partial`, at least
+/// one; those that aren't are left out), has its track, and its place is
+/// free; a file that can't be tagged stops it before any move.
 ///
 /// # Errors
 ///
@@ -278,6 +282,9 @@ pub fn file(filing: &Filing) -> Result<PathBuf, String> {
     for (i, (remote, _)) in filing.files.iter().enumerate() {
         let from = downloaded_path(&filing.source, remote);
         if !from.is_file() {
+            if filing.partial {
+                continue;
+            }
             return Err(format!("{} isn't there", from.display()));
         }
         let track = filing
@@ -296,6 +303,12 @@ pub fn file(filing: &Filing) -> Result<PathBuf, String> {
             return Err(format!("{} is there already", to.display()));
         }
         moves.push((from, to, track));
+    }
+    if moves.is_empty() {
+        return Err(format!(
+            "none of its files are in {}",
+            filing.source.display()
+        ));
     }
     for (from, _, track) in &moves {
         write_tags(from, release, track)

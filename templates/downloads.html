@@ -34,7 +34,7 @@
         </div>
         <div class="meta"><span>{{ d.folder }} · {{ d.tracks }} track{% if d.tracks != 1 %}s{% endif %} from {{ d.username }}</span><span>Queued {{ d.queued_at }}</span></div>
         {% if let Some(path) = d.path %}<div class="meta"><code title="{% if d.state == "filed" %}Where it went{% else %}Where slskd puts it{% endif %}">{{ path }}</code></div>{% endif %}
-        {% if d.state == "manual" && filing %}
+        {% if (d.state == "manual" || d.state == "failed") && filing %}
         <details class="tag-as" hx-get="/downloads/{{ d.id }}/releases" hx-trigger="toggle once" hx-target="find .tag-as-releases">
           <summary>Tag it as…</summary>
           <div class="tag-as-releases"><p class="hint">Getting its releases…</p></div>

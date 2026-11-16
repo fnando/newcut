@@ -135,22 +135,65 @@ pub fn match_folder(files: &[Candidate], releases: &[Release]) -> Match {
     }
 }
 
-/// `files` as `release`'s tracks, in track order, whatever their lengths
-/// (you said it's this release).
+/// `files` as `release`'s tracks, whatever their lengths (you said it's
+/// this release): in track order when there are as many, or by their
+/// titles or numbers when there are fewer (part of it).
 ///
 /// # Errors
 ///
-/// When there aren't as many files as tracks.
+/// When there are more files than tracks, or a file's track can't be told.
 pub fn assign(files: &[Candidate], release: &Release) -> Result<Vec<Option<String>>, String> {
-    if files.len() != release.tracks.len() {
+    if files.len() > release.tracks.len() {
         return Err(format!(
             "{} files, but that release has {} tracks",
             files.len(),
             release.tracks.len()
         ));
     }
+    if files.len() < release.tracks.len() {
+        return place(files, release);
+    }
     let mut tracks = vec![None; files.len()];
     for (&file, track) in track_order(files).iter().zip(&release.tracks) {
+        tracks[file] = Some(track.mbid.clone());
+    }
+    Ok(tracks)
+}
+
+/// Some of `release`'s tracks: each file is the track whose title its name
+/// has (the longest, when it has more than one), or else the one its
+/// number says. Every file has to land on a track of its own.
+fn place(files: &[Candidate], release: &Release) -> Result<Vec<Option<String>>, String> {
+    let mut tracks: Vec<Option<String>> = vec![None; files.len()];
+    for (file, candidate) in files.iter().enumerate() {
+        let by_title = release
+            .tracks
+            .iter()
+            .filter(|t| title_matches(&candidate.filename, &t.title))
+            .max_by_key(|t| plain(&t.title).len());
+        let by_number = track_number(&candidate.filename).and_then(|(disc, n)| {
+            release
+                .tracks
+                .iter()
+                .find(|t| t.disc == disc && t.position == n)
+        });
+        let track = by_title.or(by_number).ok_or_else(|| {
+            format!(
+                "can't tell which track {} is: neither its name nor its number says",
+                basename(&candidate.filename)
+            )
+        })?;
+        if let Some(other) = tracks
+            .iter()
+            .position(|t| t.as_deref() == Some(&track.mbid))
+        {
+            return Err(format!(
+                "{} and {} both look like {:?}",
+                basename(&files[other].filename),
+                basename(&candidate.filename),
+                track.title
+            ));
+        }
         tracks[file] = Some(track.mbid.clone());
     }
     Ok(tracks)
@@ -457,9 +500,15 @@ mod tests {
                 Some("cd-t3".to_string())
             ]
         );
+        // Part of it: by their numbers.
         assert_eq!(
-            assign(&folder[..2], &release).unwrap_err(),
-            "2 files, but that release has 3 tracks"
+            assign(&folder[..2], &release).unwrap(),
+            [Some("cd-t2".to_string()), Some("cd-t1".to_string())]
+        );
+        let more = files(&[("01", None), ("02", None), ("03", None), ("04", None)]);
+        assert_eq!(
+            assign(&more, &release).unwrap_err(),
+            "4 files, but that release has 3 tracks"
         );
     }
 
@@ -470,5 +519,41 @@ mod tests {
         assert_eq!(track_number("x\\1.03 Song.flac"), Some((1, 3)));
         assert_eq!(track_number("x\\204 Song.flac"), Some((2, 4)));
         assert_eq!(track_number("x\\A1 Song.flac"), None);
+    }
+
+    #[test]
+    fn part_of_a_release_lands_on_its_tracks() {
+        let split = release(
+            "r",
+            "2014",
+            &[
+                ("Dishonest", None),
+                ("Wonder", None),
+                ("Pete Rose and Babe Ruth", None),
+                ("Pawn Takes Rook", None),
+            ],
+        );
+        let names = |n: &[&str]| files(&n.iter().map(|n| (*n, None)).collect::<Vec<_>>());
+        // By title, whatever the numbers say.
+        assert_eq!(
+            assign(
+                &names(&["01 Pawn Takes Rook.flac", "02 Pete Rose and Babe Ruth.flac"]),
+                &split
+            )
+            .unwrap(),
+            vec![Some("r-t4".into()), Some("r-t3".into())]
+        );
+        // By number, when the titles aren't there.
+        assert_eq!(
+            assign(&names(&["03.flac", "04.flac"]), &split).unwrap(),
+            vec![Some("r-t3".into()), Some("r-t4".into())]
+        );
+        let error = assign(&names(&["track.flac"]), &split).unwrap_err();
+        assert!(
+            error.contains("can't tell which track track.flac is"),
+            "{error}"
+        );
+        let error = assign(&names(&["03 Wonder.flac", "02.flac"]), &split).unwrap_err();
+        assert!(error.contains("both look like \"Wonder\""), "{error}");
     }
 }

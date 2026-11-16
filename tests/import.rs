@@ -72,6 +72,7 @@ fn tags_names_and_moves_a_download() {
         tracks: &tracks,
         release: &release,
         template: &template,
+        partial: false,
     };
     let album = file(&filing).unwrap();
     assert_eq!(
@@ -123,4 +124,37 @@ fn tags_names_and_moves_a_download() {
     std::fs::remove_file(source.join("01 future nausea.mp3")).unwrap();
     let error = file(&filing).unwrap_err();
     assert!(error.contains("isn't there"), "{error}");
+}
+
+#[test]
+fn what_came_of_a_download_can_be_filed_when_you_say_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("downloads/newcut/abc");
+    audio(&source.join("02 good american.flac"), "flac", &[]);
+    let files = vec![
+        ("@@x\\Album\\01 future nausea.flac".to_string(), 1),
+        ("@@x\\Album\\02 good american.flac".to_string(), 1),
+    ];
+    let tracks = vec![Some("track-1".to_string()), Some("track-2".to_string())];
+    let template = format!("{}/music/%{{album}}", dir.path().display());
+    let release = release();
+    let mut filing = Filing {
+        source: source.clone(),
+        files: &files,
+        tracks: &tracks,
+        release: &release,
+        template: &template,
+        partial: false,
+    };
+    let error = file(&filing).unwrap_err();
+    assert!(error.contains("isn't there"), "{error}");
+
+    filing.partial = true;
+    let album = file(&filing).unwrap();
+    assert!(album.join("2. Good American.flac").is_file());
+    assert!(!album.join("1. Future Nausea.flac").exists());
+
+    // Nothing at all: nothing to file.
+    let error = file(&filing).unwrap_err();
+    assert!(error.contains("none of its files"), "{error}");
 }

@@ -160,6 +160,7 @@ struct ReleaseChoice {
     mbid: String,
     label: String,
     tracks: usize,
+    /// It has at least as many tracks as there are files.
     fits: bool,
     /// The one it matched (or was tagged as) before.
     current: bool,
@@ -199,10 +200,11 @@ pub(super) async fn releases(
             mbid: r.mbid.clone(),
             label: super::download::release_label(r),
             tracks: r.tracks.len(),
-            fits: r.tracks.len() == files,
+            fits: r.tracks.len() >= files,
         })
         .collect();
-    releases.sort_by_key(|r| !r.fits);
+    // As many tracks first, then those it's part of; the rest last.
+    releases.sort_by_key(|r| (!r.fits, r.tracks != files));
     Ok(render(&ReleasesFragment {
         id,
         files,
