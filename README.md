@@ -173,6 +173,9 @@ api_key = "$JELLYFIN_API_KEY"
 paths = { "/Volumes/storage/media/music" = "/data/music" }
 ```
 
+With Jellyfin on, an artist's page has "Refresh in Jellyfin": it has
+Jellyfin scan that artist's folders again (after you fixed some tags, say).
+
 Editors that understand `#:schema` (VS Code with Even Better TOML, Zed,
 Helix, …) check and complete it as you type; `newcut config schema` prints
 the schema.

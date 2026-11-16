@@ -23,6 +23,7 @@
     {% else %}
     <button hx-post="/artists/{{ artist.mbid }}/follow">Follow</button>
     {% endif %}
+    {% if jellyfin %}<button type="button" hx-post="/artists/{{ artist.mbid }}/jellyfin" hx-swap="outerHTML" title="Have Jellyfin scan {{ artist.name }}'s folders again">Refresh in Jellyfin</button>{% endif %}
     <button class="primary" hx-post="/artists/{{ artist.mbid }}/refresh">Check now</button>
   </div>
 </header>

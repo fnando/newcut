@@ -1474,3 +1474,51 @@ async fn downloads_can_be_cancelled() {
     .await;
     assert!(!body.contains("Downloading"), "no badge: {body}");
 }
+
+#[tokio::test]
+async fn artists_folders_can_be_refreshed_in_jellyfin() {
+    use wiremock::matchers::{body_json, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let s = setup(None);
+    let page = || async {
+        call(
+            &s.web,
+            get(&format!("/artists/{ARTIST}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .2
+    };
+    let button = format!("hx-post=\"/artists/{ARTIST}/jellyfin\"");
+    assert!(!page().await.contains(&button), "Jellyfin's off");
+
+    let jellyfin = MockServer::start().await;
+    {
+        let state = Db::open(&s.web.db).unwrap();
+        let config = format!(
+            "version = 1\nlibraries = [{:?}]\n\
+             [jellyfin]\nenabled = true\nserver = {:?}\napi_key = \"k\"\n\
+             paths = {{ \"/music\" = \"/data/music\" }}\n",
+            s._dir.path().display().to_string(),
+            jellyfin.uri(),
+        );
+        revisions::add(&state.conn, &config, "file", jiff::Timestamp::now()).unwrap();
+    }
+    assert!(page().await.contains(&button));
+    Mock::given(method("POST"))
+        .and(path("/Library/Media/Updated"))
+        .and(body_json(serde_json::json!({
+            "Updates": [{ "Path": "/data/music/a", "UpdateType": "Modified" }]
+        })))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&jellyfin)
+        .await;
+    let (status, _, body) =
+        call(&s.web, post(&s.web, &format!("/artists/{ARTIST}/jellyfin"))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Jellyfin is refreshing them"), "{body}");
+    assert!(body.contains("title=\"/data/music/a\""), "{body}");
+}

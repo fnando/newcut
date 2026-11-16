@@ -152,6 +152,7 @@ pub fn router(web: Arc<Web>) -> Router {
         .route("/artists/{mbid}", get(artist_page))
         .route("/artists/{mbid}/feed.atom", get(feed::artist_atom))
         .route("/artists/{mbid}/image", get(artist_image))
+        .route("/artists/{mbid}/jellyfin", post(artist_jellyfin))
         .route("/artists/{mbid}/{action}", post(artist_action))
         .route(
             "/release-groups/{mbid}/{action}",
@@ -633,6 +634,8 @@ struct ArtistPage {
     unmatched: Vec<library::OwnedAlbum>,
     /// A joined artist's members.
     members: Vec<(String, String)>,
+    /// Jellyfin's on, and they have folders it can scan again.
+    jellyfin: bool,
     image: Option<String>,
     initial: String,
     checked: Option<String>,
@@ -757,10 +760,12 @@ async fn artist_page(
                 loaded.config.covers.local && !library::artist_album_dirs(conn, &id)?.is_empty();
             let image = data::artist_image(loaded, &artist, has_files);
             let members = library::members(conn, &id)?;
-            Ok(Some((artist, rows, unmatched, image, members)))
+            let jellyfin = loaded.config.jellyfin.enabled
+                && !artist_folders(conn, loaded, &artist)?.is_empty();
+            Ok(Some((artist, rows, unmatched, image, members, jellyfin)))
         })
         .await?;
-    let Some((artist, rows, unmatched, image, members)) = found else {
+    let Some((artist, rows, unmatched, image, members, jellyfin)) = found else {
         return Ok(not_found("such artist"));
     };
     let chips = release_chips(&rows, &query.status);
@@ -776,6 +781,7 @@ async fn artist_page(
         initial: data::initial(&artist.name),
         image,
         members,
+        jellyfin,
         artist,
         sections: type_sections(rows),
         chips,
@@ -834,6 +840,47 @@ async fn artist_action(
         web.wakes.wake(Service::Discography);
     }
     Ok(refresh())
+}
+
+/// Have Jellyfin scan artist `mbid`'s folders again. The button becomes
+/// what happened.
+async fn artist_jellyfin(
+    State(web): State<Arc<Web>>,
+    Path(mbid): Path<String>,
+) -> Result<Response, WebError> {
+    let found = web
+        .db(move |conn, _, loaded| {
+            let Some(artist) = library::artist(conn, &mbid)? else {
+                return Ok(None);
+            };
+            let dirs: Vec<PathBuf> = artist_folders(conn, loaded, &artist)?
+                .into_iter()
+                .flat_map(|(_, dirs)| dirs)
+                .collect();
+            Ok(Some((loaded.clone(), dirs)))
+        })
+        .await?;
+    let Some((loaded, dirs)) = found else {
+        return Ok(not_found("such artist"));
+    };
+    if dirs.is_empty() {
+        return Ok(not_found("folder of theirs"));
+    }
+    match crate::jellyfin::refresh(&loaded, &dirs).await {
+        Ok(paths) => Ok(Html(format!(
+            "<button type=\"button\" class=\"small\" disabled title=\"{}\">Jellyfin is refreshing them</button>",
+            paths
+                .join(", ")
+                .replace('&', "&amp;")
+                .replace('"', "&quot;")
+                .replace('<', "&lt;")
+        ))
+        .into_response()),
+        Err(e) => {
+            tracing::warn!("jellyfin: {e:#}");
+            Ok((StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response())
+        }
+    }
 }
 
 /// Scan artist `mbid`'s folders (where their albums are, and

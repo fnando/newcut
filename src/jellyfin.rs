@@ -54,11 +54,25 @@ impl Jellyfin {
     ///
     /// When Jellyfin can't be reached, or answers something else.
     pub async fn created(&self, paths: &[String]) -> anyhow::Result<()> {
+        self.updated(paths, "Created").await
+    }
+
+    /// Tell Jellyfin `paths` (as it sees them) changed: it scans them
+    /// again.
+    ///
+    /// # Errors
+    ///
+    /// When Jellyfin can't be reached, or answers something else.
+    pub async fn modified(&self, paths: &[String]) -> anyhow::Result<()> {
+        self.updated(paths, "Modified").await
+    }
+
+    async fn updated(&self, paths: &[String], kind: &str) -> anyhow::Result<()> {
         let url = format!("{}/Library/Media/Updated", self.server);
         let body = json!({
             "Updates": paths
                 .iter()
-                .map(|p| json!({ "Path": p, "UpdateType": "Created" }))
+                .map(|p| json!({ "Path": p, "UpdateType": kind }))
                 .collect::<Vec<_>>(),
         });
         tracing::debug!("POST {url} ({})", paths.join(", "));
@@ -104,6 +118,26 @@ pub fn their_path(dir: &Path, paths: &[(PathBuf, String)]) -> String {
                 }
             },
         )
+}
+
+/// Have Jellyfin scan `dirs` (newcut's) again; returns them as Jellyfin
+/// sees them.
+///
+/// # Errors
+///
+/// When Jellyfin is off, or can't be reached, or answers something else.
+pub async fn refresh(loaded: &Loaded, dirs: &[PathBuf]) -> anyhow::Result<Vec<String>> {
+    let config = &loaded.config.jellyfin;
+    if !config.enabled {
+        anyhow::bail!("Jellyfin is off: set [jellyfin] enabled = true");
+    }
+    let paths: Vec<String> = dirs
+        .iter()
+        .map(|d| their_path(d, &loaded.jellyfin_paths))
+        .collect();
+    Jellyfin::new(config)?.modified(&paths).await?;
+    tracing::info!("asked Jellyfin to scan {} again", paths.join(", "));
+    Ok(paths)
 }
 
 /// Tell Jellyfin (when it's on) about the album folders just filed. Its
