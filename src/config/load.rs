@@ -31,6 +31,16 @@ pub struct ImportPaths {
     pub downloads: PathBuf,
     /// A path with `%{…}` placeholders.
     pub output: String,
+    /// `slskd.after_filing`, its program expanded.
+    pub after_filing: Option<AfterFiling>,
+}
+
+/// A program run on each album folder filed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AfterFiling {
+    pub bin: PathBuf,
+    pub args: Vec<String>,
+    pub timeout: std::time::Duration,
 }
 
 impl Loaded {
@@ -284,12 +294,40 @@ fn check_slskd(
                     downloads.display()
                 ));
             }
+            let after_filing = slskd.after_filing.as_ref().and_then(|hook| {
+                let known = crate::import::arg_placeholders();
+                for arg in &hook.args {
+                    if let Err(e) = crate::import::check_placeholders(arg, &known) {
+                        error(format!("slskd.after_filing.args: {e}"));
+                    }
+                }
+                let bin = check_bin(
+                    "slskd.after_filing.bin",
+                    &hook.bin,
+                    home,
+                    origin,
+                    error,
+                    warnings,
+                )?;
+                Some(AfterFiling {
+                    bin,
+                    args: hook.args.clone(),
+                    timeout: hook.timeout.0,
+                })
+            });
             Some(ImportPaths {
                 downloads,
                 output: output.to_string_lossy().into_owned(),
+                after_filing,
             })
         }
-        (None, None) => None,
+        (None, None) if slskd.after_filing.is_none() => None,
+        (None, None) => {
+            warnings.push(format!(
+                "{origin}: slskd.after_filing: newcut files nothing without downloads_dir and output_dir"
+            ));
+            None
+        }
         _ => {
             warnings.push(format!(
                 "{origin}: slskd: set both downloads_dir and output_dir to tag and file downloads"
@@ -332,33 +370,63 @@ fn check_notification(
         }
     }
     let command = config.notification.command.as_ref()?;
-    let bin = match crate::paths::expand(&command.bin, home) {
-        Ok(bin) if bin.is_absolute() => bin,
+    if command.enabled {
+        check_bin(
+            "notification.command.bin",
+            &command.bin,
+            home,
+            origin,
+            error,
+            warnings,
+        )
+    } else {
+        expand_bin("notification.command.bin", &command.bin, home, error)
+    }
+}
+
+/// A program's full path (`key` names its setting).
+fn expand_bin(
+    key: &str,
+    bin: &str,
+    home: &Path,
+    error: &mut impl FnMut(String),
+) -> Option<PathBuf> {
+    match crate::paths::expand(bin, home) {
+        Ok(path) if path.is_absolute() => Some(path),
         Ok(_) => {
             error(format!(
-                "notification.command.bin: {:?} must be a full path: start with /, ~ or $VAR",
-                command.bin
+                "{key}: {bin:?} must be a full path: start with /, ~ or $VAR"
             ));
-            return None;
+            None
         }
         Err(e) => {
-            error(format!("notification.command.bin: {e}"));
-            return None;
+            error(format!("{key}: {e}"));
+            None
         }
-    };
-    if command.enabled {
-        use std::os::unix::fs::PermissionsExt;
-        match std::fs::metadata(&bin) {
-            Ok(m) if m.is_file() && m.permissions().mode() & 0o111 != 0 => {}
-            Ok(_) => warnings.push(format!(
-                "{origin}: notification.command.bin: {} isn't an executable file",
-                bin.display()
-            )),
-            Err(_) => warnings.push(format!(
-                "{origin}: notification.command.bin: {} isn't there (yet?)",
-                bin.display()
-            )),
-        }
+    }
+}
+
+/// [`expand_bin`], with a warning when it isn't (yet) a program.
+fn check_bin(
+    key: &str,
+    bin: &str,
+    home: &Path,
+    origin: &str,
+    error: &mut impl FnMut(String),
+    warnings: &mut Vec<String>,
+) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = expand_bin(key, bin, home, error)?;
+    match std::fs::metadata(&bin) {
+        Ok(m) if m.is_file() && m.permissions().mode() & 0o111 != 0 => {}
+        Ok(_) => warnings.push(format!(
+            "{origin}: {key}: {} isn't an executable file",
+            bin.display()
+        )),
+        Err(_) => warnings.push(format!(
+            "{origin}: {key}: {} isn't there (yet?)",
+            bin.display()
+        )),
     }
     Some(bin)
 }
@@ -557,6 +625,58 @@ mod tests {
                 == crate::config::Strategy::All
         );
         assert!(check("version = 1\n[notification]\nstrategy = \"some\"\n").is_err());
+    }
+
+    #[test]
+    fn after_filing_is_checked() {
+        let slskd = "version = 1\n[slskd]\nenabled = true\napi_key = \"k\"\n\
+                     downloads_dir = \"/nowhere/downloads\"\noutput_dir = \"~/Music/%{album}\"\n";
+        let loaded = check(&format!(
+            "{slskd}[slskd.after_filing]\nbin = \"~/bin/tidy\"\nargs = [\"-q\", \"%{{album_dir}}\"]\n"
+        ))
+        .unwrap();
+        let hook = loaded.import.unwrap().after_filing.unwrap();
+        assert_eq!(hook.bin, Path::new("/home/me/bin/tidy"));
+        assert_eq!(hook.args, ["-q", "%{album_dir}"]);
+        assert_eq!(hook.timeout.as_secs(), 600);
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|w| w.contains("slskd.after_filing.bin: /home/me/bin/tidy isn't there")),
+            "{:?}",
+            loaded.warnings
+        );
+        let errors = check(&format!(
+            "{slskd}[slskd.after_filing]\nbin = \"tidy\"\nargs = [\"%{{dir}}\"]\n"
+        ))
+        .unwrap_err();
+        assert!(
+            errors
+                .join("\n")
+                .contains("slskd.after_filing.args: %{dir} isn't a placeholder"),
+            "{errors:?}"
+        );
+        assert!(
+            errors
+                .join("\n")
+                .contains("slskd.after_filing.bin: \"tidy\" must be a full path"),
+            "{errors:?}"
+        );
+        // Nothing's filed: it'd never run.
+        let loaded = check(
+            "version = 1\n[slskd]\nenabled = true\napi_key = \"k\"\n\
+             [slskd.after_filing]\nbin = \"/bin/true\"\n",
+        )
+        .unwrap();
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|w| w.contains("newcut files nothing")),
+            "{:?}",
+            loaded.warnings
+        );
     }
 
     #[test]

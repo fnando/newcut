@@ -173,6 +173,25 @@ pub async fn output_with_input(
     })
 }
 
+/// What a program that exited with an error said: its exit status and
+/// the last lines of its stderr.
+#[must_use]
+pub fn failure(bin: &std::path::Path, output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
+    let tail: Vec<&str> = tail.into_iter().rev().collect();
+    format!(
+        "{} {}{}",
+        bin.display(),
+        output.status,
+        if tail.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", tail.join(" / "))
+        }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

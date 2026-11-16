@@ -66,6 +66,7 @@ api_key = "$SLSKD_API_KEY"
 # machine sees it, and where albums go. Downloads that match a release
 # exactly are tagged (as MusicBrainz Picard tags them) and moved there; the
 # rest wait for you on the Downloads page. Placeholders: %{artist},
+# %{artistid} (MusicBrainz IDs, joined with "; " as Picard does),
 # %{artist_sort}, %{album}, %{year} (first release), %{date}, %{release_year},
 # %{country}, %{media}, %{label}, %{catalog_number}, %{type}, %{releaseid},
 # %{releasegroupid}.
@@ -73,6 +74,17 @@ api_key = "$SLSKD_API_KEY"
 # output_dir = "~/Music/%{artist}/%{album} (%{year})"
 # A download that fails is replaced by the best untried folder that's
 # lossless and matches a release exactly (up to 3 failures per album).
+
+# Your own program, run on each album folder newcut files (in that folder):
+# after it's tagged and moved, before Jellyfin hears of it. Its args take
+# %{album_dir} (the album's folder) and output_dir's placeholders; its
+# environment has NEWCUT_ALBUM_DIR, NEWCUT_ARTIST, NEWCUT_ARTIST_MBID,
+# NEWCUT_ALBUM, NEWCUT_RELEASE_MBID and NEWCUT_RELEASE_GROUP_MBID. It must
+# leave the folder where it is; when it fails, the album is filed anyway.
+# [slskd.after_filing]
+# bin = "~/bin/replaygain"
+# args = ["--quiet", "--dir", "%{album_dir}"]
+# timeout = "10m"
 
 [jellyfin]
 # Tell Jellyfin (https://jellyfin.org) about the albums newcut files, so it

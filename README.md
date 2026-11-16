@@ -145,8 +145,9 @@ them, named like `1. Title.flac` (`1-01. Title.flac` on multi-disc
 releases), moved under `output_dir` with the release's `cover.jpg`, and
 scanned. The rest wait on the Downloads page: tag one as a release you pick
 (its files in track order), or deal with it yourself and say so.
-`output_dir`'s placeholders: `%{artist}`, `%{artist_sort}`, `%{album}`,
-`%{year}` (the first release's), `%{date}`, `%{release_year}`, `%{country}`,
+`output_dir`'s placeholders: `%{artist}`, `%{artistid}` (the artists'
+MusicBrainz IDs, joined with `; ` as Picard does), `%{artist_sort}`,
+`%{album}`, `%{year}` (the first release's), `%{date}`, `%{release_year}`, `%{country}`,
 `%{media}`, `%{label}`, `%{catalog_number}`, `%{type}`, `%{releaseid}` and
 `%{releasegroupid}`.
 
@@ -155,6 +156,22 @@ Soulseek again and queues the best folder that's lossless, matches one of the
 album's releases exactly, and wasn't tried for it before. After 3 failures of
 the same album, or when nothing else will do, it tells you instead. Downloads
 you cancelled, or took off slskd's list, aren't replaced.
+
+To run your own program on each album newcut files (to add ReplayGain, say),
+set `after_filing`. It runs in the album's folder after the album is tagged
+and moved, and before Jellyfin hears of it. Its `args` take `%{album_dir}`
+(the album's folder) and `output_dir`'s placeholders; its environment has
+`NEWCUT_ALBUM_DIR`, `NEWCUT_ARTIST`, `NEWCUT_ARTIST_MBID` (as `%{artistid}`),
+`NEWCUT_ALBUM`, `NEWCUT_RELEASE_MBID` and `NEWCUT_RELEASE_GROUP_MBID`. It must
+leave the folder where it is. When it fails (or takes longer than `timeout`,
+10 minutes by default), that's logged: the album is filed anyway.
+
+```toml
+[slskd.after_filing]
+bin = "~/bin/replaygain"
+args = ["--quiet", "--dir", "%{album_dir}"]
+timeout = "5m"
+```
 
 A download that's still going (or failed) can be cancelled from the
 Downloads page or the album's: its files are cancelled in slskd, and the

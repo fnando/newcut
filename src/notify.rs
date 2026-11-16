@@ -255,19 +255,7 @@ pub async fn command(
     if output.status.success() {
         return Ok(());
     }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
-    let tail: Vec<&str> = tail.into_iter().rev().collect();
-    anyhow::bail!(
-        "{} {}{}",
-        bin.display(),
-        output.status,
-        if tail.is_empty() {
-            String::new()
-        } else {
-            format!(": {}", tail.join(" / "))
-        }
-    )
+    anyhow::bail!(crate::process::failure(bin, &output))
 }
 
 #[cfg(test)]

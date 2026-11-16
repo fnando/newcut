@@ -281,10 +281,30 @@ pub struct SlskdConfig {
     pub downloads_dir: Option<String>,
     /// Where tagged albums go: a path with placeholders, e.g.
     /// `"~/Music/%{artist}/%{album} (%{year})"`. Placeholders: `artist`,
+    /// `artistid` (MusicBrainz IDs, joined with `; ` as Picard does),
     /// `artist_sort`, `album`, `year` (the first release's), `date` (this
     /// release's), `release_year`, `country`, `media`, `label`,
     /// `catalog_number`, `type`, `releaseid`, `releasegroupid`.
     pub output_dir: Option<String>,
+    /// Your own program, run on each album folder newcut files: after it's
+    /// tagged and moved under `output_dir`, before Jellyfin hears of it.
+    pub after_filing: Option<AfterFilingConfig>,
+}
+
+/// A program run on each album folder newcut files (in that folder). It
+/// must leave the folder where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AfterFilingConfig {
+    /// The program to run (`~` and `$VAR` are expanded).
+    pub bin: String,
+    /// Its arguments. Placeholders: `album_dir` (the album's folder), and
+    /// those of `output_dir`, e.g. `["--dir", "%{album_dir}"]`.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Stopped after this long.
+    #[serde(default = "after_filing_timeout")]
+    pub timeout: Every,
 }
 
 /// Jellyfin: told to look at the albums newcut files, so they show up
@@ -312,6 +332,7 @@ impl Default for SlskdConfig {
             api_key: String::new(),
             downloads_dir: None,
             output_dir: None,
+            after_filing: None,
         }
     }
 }
@@ -395,6 +416,10 @@ fn pushover_server() -> String {
 
 fn command_timeout() -> Every {
     Every(Duration::from_secs(60))
+}
+
+fn after_filing_timeout() -> Every {
+    Every(Duration::from_secs(600))
 }
 
 /// How often each service does its work.

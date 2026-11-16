@@ -372,6 +372,7 @@ impl Work<'_> {
                 &download,
                 &paths,
                 false,
+                self.shutdown,
             );
             match filing.await {
                 Ok(dir) => {

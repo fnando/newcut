@@ -274,8 +274,15 @@ pub(super) async fn file(
     let mut download = download;
     download.matched = matched.clone();
     let http = crate::http::Http::new(musicbrainz.contact.as_deref());
-    let filed =
-        crate::import::file_download(&http, &musicbrainz.server, &download, &paths, true).await;
+    let filed = crate::import::file_download(
+        &http,
+        &musicbrainz.server,
+        &download,
+        &paths,
+        true,
+        &web.shutdown,
+    )
+    .await;
     let filed_to = filed.as_ref().ok().cloned();
     web.db(move |conn, _, _| {
         downloads::set_matched(conn, id, &matched)?;

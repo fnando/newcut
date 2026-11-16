@@ -12,8 +12,9 @@ use lofty::tag::{ItemKey, ItemValue, Tag, TagExt, TagItem};
 use crate::musicbrainz::{ReleaseInfo, TrackInfo};
 
 /// What `slskd.output_dir` can say.
-pub const PLACEHOLDERS: [&str; 13] = [
+pub const PLACEHOLDERS: [&str; 14] = [
     "artist",
+    "artistid",
     "artist_sort",
     "album",
     "year",
@@ -34,6 +35,25 @@ pub const PLACEHOLDERS: [&str; 13] = [
 ///
 /// Names the first that isn't one, or a `%{` left open.
 pub fn check_template(template: &str) -> Result<(), String> {
+    check_placeholders(template, &PLACEHOLDERS)
+}
+
+/// What `slskd.after_filing.args` can say: [`PLACEHOLDERS`], and
+/// `album_dir` (the album's folder).
+#[must_use]
+pub fn arg_placeholders() -> Vec<&'static str> {
+    let mut all = PLACEHOLDERS.to_vec();
+    all.push("album_dir");
+    all
+}
+
+/// Whether `template`'s placeholders are all `known`; names the first
+/// that isn't one, or a `%{` left open.
+///
+/// # Errors
+///
+/// As said.
+pub fn check_placeholders(template: &str, known: &[&str]) -> Result<(), String> {
     let mut rest = template;
     while let Some(start) = rest.find("%{") {
         let after = &rest[start + 2..];
@@ -41,10 +61,10 @@ pub fn check_template(template: &str) -> Result<(), String> {
             return Err(format!("{template:?} has a %{{ that isn't closed"));
         };
         let name = &after[..end];
-        if !PLACEHOLDERS.contains(&name) {
+        if !known.contains(&name) {
             return Err(format!(
                 "%{{{name}}} isn't a placeholder; use {}",
-                PLACEHOLDERS
+                known
                     .iter()
                     .map(|p| format!("%{{{p}}}"))
                     .collect::<Vec<_>>()
@@ -66,6 +86,8 @@ fn value(name: &str, release: &ReleaseInfo) -> String {
     let text = |v: &Option<String>| v.clone().unwrap_or_default();
     match name {
         "artist" => release.artist.name.clone(),
+        // As Picard's %musicbrainz_albumartistid%: each, in credit order.
+        "artistid" => release.artist.ids.join("; "),
         "artist_sort" => release.artist.sort.clone(),
         "album" => release.title.clone(),
         "year" => year(release.original_date.as_ref().or(release.date.as_ref())),
@@ -107,6 +129,11 @@ fn media(release: &ReleaseInfo) -> String {
 /// `template` with `release`'s values (each made safe as a file name).
 #[must_use]
 pub fn album_dir(template: &str, release: &ReleaseInfo) -> PathBuf {
+    PathBuf::from(fill(template, |name| safe(&value(name, release))))
+}
+
+/// `template` with each `%{name}` as `value` says.
+fn fill(template: &str, value: impl Fn(&str) -> String) -> String {
     let mut out = String::new();
     let mut rest = template;
     while let Some(start) = rest.find("%{") {
@@ -117,11 +144,11 @@ pub fn album_dir(template: &str, release: &ReleaseInfo) -> PathBuf {
             rest = "";
             break;
         };
-        out.push_str(&safe(&value(&after[..end], release)));
+        out.push_str(&value(&after[..end]));
         rest = &after[end + 1..];
     }
     out.push_str(rest);
-    PathBuf::from(out)
+    out
 }
 
 /// `text` as a file name: no slashes, nor what Windows and SMB shares
@@ -185,8 +212,8 @@ pub struct Filing<'a> {
 
 /// File a finished download: tagged as the release it matched, and moved
 /// under `slskd.output_dir`, with the release's cover. Unless `forced` (you
-/// said which release it is), only an exact match is. Returns the album's
-/// folder.
+/// said which release it is), only an exact match is. Then
+/// `slskd.after_filing` runs on it. Returns the album's folder.
 ///
 /// # Errors
 ///
@@ -197,6 +224,7 @@ pub async fn file_download(
     download: &crate::state::downloads::Download,
     paths: &crate::config::load::ImportPaths,
     forced: bool,
+    shutdown: &crate::shutdown::Shutdown,
 ) -> Result<PathBuf, String> {
     // Queued before newcut chose: where slskd puts downloads by default, a
     // folder named after the remote one.
@@ -238,7 +266,62 @@ pub async fn file_download(
         partial: forced,
     })?;
     save_cover(http, &info.mbid, &dir).await;
+    if let Some(hook) = &paths.after_filing {
+        // Filed either way: what it said is logged.
+        match after_filing(hook, &dir, &info, shutdown).await {
+            Ok(()) => tracing::info!("{} ran on {}", hook.bin.display(), dir.display()),
+            Err(e) => tracing::warn!("slskd.after_filing on {}: {e:#}", dir.display()),
+        }
+    }
     Ok(dir)
+}
+
+/// How long `slskd.after_filing` gets between SIGTERM and SIGKILL.
+const KILL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Run `hook` on album folder `dir`: its `%{…}` arguments filled in
+/// (`%{album_dir}` is `dir`), run in `dir`, with the release in its
+/// environment too.
+///
+/// # Errors
+///
+/// When it can't start, exits with an error, or runs out of time.
+pub async fn after_filing(
+    hook: &crate::config::load::AfterFiling,
+    dir: &Path,
+    release: &ReleaseInfo,
+    shutdown: &crate::shutdown::Shutdown,
+) -> anyhow::Result<()> {
+    let mut command = tokio::process::Command::new(&hook.bin);
+    let album_dir = dir.to_string_lossy();
+    let args = hook.args.iter().map(|arg| {
+        fill(arg, |name| match name {
+            "album_dir" => album_dir.to_string(),
+            name => value(name, release),
+        })
+    });
+    command
+        .args(args)
+        .current_dir(dir)
+        .env("NEWCUT_ALBUM_DIR", dir)
+        .env("NEWCUT_ARTIST", &release.artist.name)
+        .env("NEWCUT_ARTIST_MBID", release.artist.ids.join("; "))
+        .env("NEWCUT_ALBUM", &release.title)
+        .env("NEWCUT_RELEASE_MBID", &release.mbid)
+        .env("NEWCUT_RELEASE_GROUP_MBID", &release.group_mbid);
+    let output = crate::process::output_with_input(
+        &mut command,
+        Vec::new(),
+        hook.timeout,
+        KILL_GRACE,
+        shutdown,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{}: {e}", hook.bin.display()))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    anyhow::bail!(crate::process::failure(&hook.bin, &output))
 }
 
 #[cfg(not(test))]
@@ -471,5 +554,52 @@ mod tests {
             downloaded_path(Path::new("/d"), "@@x\\Album\\01 a/b.flac"),
             PathBuf::from("/d/01 a_b.flac")
         );
+    }
+
+    #[tokio::test]
+    async fn after_filing_runs_on_the_album_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let album = root.join("album");
+        std::fs::create_dir(&album).unwrap();
+        let bin = root.join("hook.sh");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\necho \"$#:$1 $2 $3|$(pwd -P)|$NEWCUT_ALBUM|$NEWCUT_RELEASE_GROUP_MBID\" > ran\n\
+             [ \"$1\" = fail ] && { echo nope >&2; exit 3; }\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut release = release();
+        release.group_mbid = "rg".into();
+        let mut hook = crate::config::load::AfterFiling {
+            bin: bin.clone(),
+            args: vec![
+                "--dir".into(),
+                "%{album_dir}".into(),
+                "%{artist} - %{album} [%{releasegroupid}] %{artistid}".into(),
+            ],
+            timeout: std::time::Duration::from_secs(5),
+        };
+        let shutdown = crate::shutdown::Shutdown::default();
+        after_filing(&hook, &album, &release, &shutdown)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(album.join("ran")).unwrap().trim(),
+            format!(
+                "3:--dir {} A & B - Future: Nausea? [rg] a; b|{}|Future: Nausea?|rg",
+                album.display(),
+                album.display()
+            )
+        );
+
+        hook.args = vec!["fail".into()];
+        let error = after_filing(&hook, &album, &release, &shutdown)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("exit status: 3: nope"), "{error}");
     }
 }
