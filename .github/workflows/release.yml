@@ -1,3 +1,4 @@
+---
 name: Release
 
 on:
@@ -56,7 +57,6 @@ jobs:
           sed -i "0,/^version = \"$old\"/s//version = \"$VERSION\"/" Cargo.toml
           cargo update --workspace
           sed -i "s|/v$old/|/v$VERSION/|" examples/config.toml
-          sed -i "s/newcut $old;/newcut $VERSION;/" tests/snapshots/config_validation__version.snap
           cargo run --quiet -- config schema > schema/newcut.v1.schema.json
           git diff --stat
 
@@ -76,4 +76,4 @@ jobs:
             --base "${{ github.ref_name }}" \
             --head "$branch" \
             --title "Release v$VERSION" \
-            --body "Bumps newcut from $CURRENT to $VERSION: Cargo.toml, Cargo.lock, the config schema, the example config and the version snapshot."
+            --body "Bumps newcut from $CURRENT to $VERSION: Cargo.toml, Cargo.lock, the config schema, and the example config."
