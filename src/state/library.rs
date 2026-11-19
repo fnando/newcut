@@ -938,6 +938,8 @@ pub struct Untagged {
     pub files: i64,
     /// You'd rather not see it.
     pub ignored: bool,
+    /// The untagged files' names, under `dir`.
+    pub names: Vec<String>,
 }
 
 /// Folders with files that have no release or release group id.
@@ -964,18 +966,45 @@ pub fn untagged(conn: &Connection) -> rusqlite::Result<Vec<Untagged>> {
                GROUP BY library, dir) u
          ORDER BY library, dir",
     )?;
-    stmt.query_map([], |r| {
-        Ok(Untagged {
-            library: r.get(0)?,
-            dir: r.get(1)?,
-            album: r.get(2)?,
-            artist: r.get(3)?,
-            artist_mbid: r.get(5)?,
-            files: r.get(4)?,
-            ignored: r.get(6)?,
-        })
-    })?
-    .collect()
+    let mut found = stmt
+        .query_map([], |r| {
+            Ok(Untagged {
+                library: r.get(0)?,
+                dir: r.get(1)?,
+                album: r.get(2)?,
+                artist: r.get(3)?,
+                artist_mbid: r.get(5)?,
+                files: r.get(4)?,
+                ignored: r.get(6)?,
+                names: Vec::new(),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut names: HashMap<(String, String), Vec<String>> = HashMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT library, dir, path FROM files
+         WHERE release_mbid IS NULL AND release_group_mbid IS NULL ORDER BY path",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (library, dir, path) = row?;
+        let name = std::path::Path::new(&path)
+            .strip_prefix(&dir)
+            .map_or_else(|_| path.clone(), |p| p.display().to_string());
+        names.entry((library, dir)).or_default().push(name);
+    }
+    for folder in &mut found {
+        folder.names = names
+            .remove(&(folder.library.clone(), folder.dir.clone()))
+            .unwrap_or_default();
+    }
+    Ok(found)
 }
 
 /// Leave the untagged folder `dir` (of `library`) out of the Untagged
@@ -1169,6 +1198,7 @@ mod tests {
         assert_eq!(groups, [Some("g1".into()), Some("g2".into())]);
         let found = untagged(conn).unwrap();
         assert_eq!(found.len(), 1);
+        assert_eq!(found[0].names, ["1.flac"]);
         let totals = &library_totals(conn).unwrap()["/music"];
         assert_eq!(
             (totals.files, totals.albums, totals.artists, totals.untagged),

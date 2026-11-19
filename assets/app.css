@@ -527,6 +527,9 @@ pre.toml { white-space: pre; overflow-x: auto; overflow-wrap: normal; line-heigh
   color: var(--muted);
 }
 .meta code { color: var(--faint); }
+.untagged-files { margin-top: 4px; font-size: var(--font-sm); color: var(--muted); }
+.untagged-files ul { margin: 4px 0 0; padding-left: 18px; }
+.untagged-files code { color: var(--faint); }
 .row-side {
   display: flex;
   align-items: center;

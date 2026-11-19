@@ -31,7 +31,8 @@
   <div class="row{% if folder.ignored %} dim{% endif %}">
     <div class="row-main">
       <div class="row-title">{{ folder.album.as_deref().unwrap_or("Untitled") }}{% if let Some(artist) = folder.artist %} <span class="muted">· {% if let Some(mbid) = folder.artist_mbid %}<a href="/artists/{{ mbid }}">{{ artist }}</a>{% else %}{{ artist }}{% endif %}</span>{% endif %}</div>
-      <div class="meta"><code>{{ folder.dir }}</code><span>{{ folder.files }} files</span></div>
+      <div class="meta"><code>{{ folder.dir }}</code></div>
+      <details class="untagged-files"><summary>{{ folder.files }} {% if folder.files == 1 %}file{% else %}files{% endif %}</summary><ul>{% for name in folder.names %}<li><code>{{ name }}</code></li>{% endfor %}</ul></details>
     </div>
     <form class="row-side" hx-post="/untagged/{% if folder.ignored %}unignore{% else %}ignore{% endif %}">
       <input type="hidden" name="library" value="{{ folder.library }}">
