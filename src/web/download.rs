@@ -509,6 +509,16 @@ struct DownloadView {
     state: String,
     detail: Option<String>,
     filed_to: Option<String>,
+    /// It's an upgrade: from what, to what.
+    upgrade: Option<String>,
+}
+
+/// What an upgrade does: "MP3 192 kbps → FLAC 16-bit/44.1 kHz".
+pub(super) fn upgrade_label(download: &crate::state::downloads::Download) -> Option<String> {
+    download
+        .upgrade
+        .as_ref()
+        .map(|u| format!("{} → {}", u.from, u.to))
 }
 
 /// The folders queued for release `key`, and how they're doing in slskd.
@@ -558,6 +568,7 @@ pub(super) async fn downloads(
                 state: d.state.clone(),
                 detail: d.detail.clone(),
                 filed_to: d.filed_to.clone(),
+                upgrade: upgrade_label(d),
                 id: d.id,
                 name: d.dir.rsplit('\\').next().unwrap_or(&d.dir).to_string(),
                 username: d.username.clone(),

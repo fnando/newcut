@@ -32,6 +32,7 @@ pub struct ScannedFile {
     pub release_mbid: Option<String>,
     pub release_group_mbid: Option<String>,
     pub artist_mbids: Vec<String>,
+    pub quality: crate::quality::Quality,
 }
 
 /// What's known of each file in `library`: path → (mtime, size).
@@ -69,12 +70,15 @@ pub fn upsert_file(conn: &Connection, file: &ScannedFile, now: Timestamp) -> rus
     };
     conn.execute(
         "INSERT INTO files (path, library, dir, mtime, size, album, album_artist, release_mbid,
-           release_group_mbid, scanned_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+           release_group_mbid, scanned_at, format, lossless, bit_depth, sample_rate, bitrate)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT (path) DO UPDATE SET library = excluded.library, dir = excluded.dir,
            mtime = excluded.mtime, size = excluded.size, album = excluded.album,
            album_artist = excluded.album_artist, release_mbid = excluded.release_mbid,
-           release_group_mbid = excluded.release_group_mbid, scanned_at = excluded.scanned_at",
+           release_group_mbid = excluded.release_group_mbid, scanned_at = excluded.scanned_at,
+           format = excluded.format, lossless = excluded.lossless,
+           bit_depth = excluded.bit_depth, sample_rate = excluded.sample_rate,
+           bitrate = excluded.bitrate",
         params![
             file.path,
             file.library,
@@ -85,7 +89,12 @@ pub fn upsert_file(conn: &Connection, file: &ScannedFile, now: Timestamp) -> rus
             file.album_artist,
             file.release_mbid,
             group,
-            now.to_string()
+            now.to_string(),
+            file.quality.format,
+            file.quality.lossless,
+            file.quality.bit_depth,
+            file.quality.sample_rate,
+            file.quality.bitrate,
         ],
     )?;
     conn.execute("DELETE FROM file_artists WHERE path = ?1", [&file.path])?;
@@ -129,6 +138,21 @@ pub fn remove_files(conn: &Connection, paths: &[String]) -> rusqlite::Result<()>
         stmt.execute([path])?;
     }
     Ok(())
+}
+
+/// Forget the files in folder `dir` and those under it (gone: an upgrade
+/// replaced them).
+///
+/// # Errors
+///
+/// On database errors.
+pub fn remove_files_under(conn: &Connection, dir: &str) -> rusqlite::Result<usize> {
+    let dir = dir.trim_end_matches('/');
+    let prefix = format!("{dir}/");
+    conn.execute(
+        "DELETE FROM files WHERE dir = ?1 OR substr(dir, 1, length(?2)) = ?2",
+        params![dir, prefix],
+    )
 }
 
 /// Forget the files of libraries no longer in the config.
@@ -809,6 +833,96 @@ pub fn set_ignored(
     Ok(())
 }
 
+// ---------- quality ----------
+
+/// An album you have, and how good it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlbumQuality {
+    pub release_group_mbid: String,
+    /// Its best copy's folders (a copy: its files in one library).
+    pub dirs: Vec<String>,
+    /// The releases its files are tagged as.
+    pub release_mbids: Vec<String>,
+    /// Its best copy's, as good as its worst file.
+    pub quality: crate::quality::Quality,
+}
+
+/// Each album you have (by release group; `only`: just that one), with
+/// its quality. With copies in more than one library (a lossy one for your
+/// phone, say), the best counts, and is the one an upgrade replaces.
+///
+/// # Errors
+///
+/// On database errors.
+pub fn album_qualities(
+    conn: &Connection,
+    only: Option<&str>,
+) -> rusqlite::Result<Vec<AlbumQuality>> {
+    use crate::quality::Quality;
+    /// A copy: its folders and files' qualities.
+    type Copy = (Vec<String>, Vec<Quality>);
+    /// A release group, its releases, and each library's copy.
+    type Album = (String, Vec<String>, Vec<(String, Copy)>);
+    let mut stmt = conn.prepare(
+        "SELECT release_group_mbid, library, dir, release_mbid, format, lossless, bit_depth,
+                sample_rate, bitrate
+         FROM files WHERE release_group_mbid IS NOT NULL
+           AND (?1 IS NULL OR release_group_mbid = ?1)
+         ORDER BY release_group_mbid, library, dir, path",
+    )?;
+    let rows = stmt.query_map([only], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, Option<String>>(3)?,
+            Quality {
+                format: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                lossless: r.get(5)?,
+                bit_depth: r.get(6)?,
+                sample_rate: r.get(7)?,
+                bitrate: r.get(8)?,
+            },
+        ))
+    })?;
+    let mut albums: Vec<Album> = Vec::new();
+    for row in rows {
+        let (group, library, dir, release, quality) = row?;
+        if albums.last().is_none_or(|(g, _, _)| *g != group) {
+            albums.push((group, Vec::new(), Vec::new()));
+        }
+        let (_, releases, copies) = albums.last_mut().expect("just pushed");
+        if let Some(release) = release
+            && !releases.contains(&release)
+        {
+            releases.push(release);
+        }
+        if copies.last().is_none_or(|(l, _)| *l != library) {
+            copies.push((library, (Vec::new(), Vec::new())));
+        }
+        let (_, (dirs, files)) = copies.last_mut().expect("just pushed");
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+        files.push(quality);
+    }
+    Ok(albums
+        .into_iter()
+        .filter_map(|(group, release_mbids, copies)| {
+            let (dirs, quality) = copies
+                .into_iter()
+                .filter_map(|(_, (dirs, files))| Some((dirs, Quality::worst(&files)?)))
+                .max_by(|(_, a), (_, b)| a.cmp_rank(b))?;
+            Some(AlbumQuality {
+                release_group_mbid: group,
+                dirs,
+                release_mbids,
+                quality,
+            })
+        })
+        .collect())
+}
+
 // ---------- totals ----------
 
 /// Untagged album folders: files with no release (group) id.
@@ -903,7 +1017,53 @@ mod tests {
             release_mbid: release.map(Into::into),
             release_group_mbid: group.map(Into::into),
             artist_mbids: artists.iter().map(|a| (*a).to_string()).collect(),
+            quality: crate::quality::Quality::default(),
         }
+    }
+
+    #[test]
+    fn an_album_is_as_good_as_its_worst_file() {
+        use crate::quality::Quality;
+        let state = State::open_in_memory().unwrap();
+        let conn = &state.conn;
+        let now = Timestamp::now();
+        let mp3 = |kbps| Quality {
+            format: "MP3".into(),
+            bitrate: Some(kbps),
+            ..Quality::default()
+        };
+        for (path, kbps) in [("/music/a/cd1/1.mp3", 320), ("/music/a/cd2/1.mp3", 192)] {
+            let mut f = file(path, Some("r1"), Some("rg"), &["x"]);
+            f.quality = mp3(kbps);
+            upsert_file(conn, &f, now).unwrap();
+        }
+        upsert_file(
+            conn,
+            &file("/music/b/1.flac", None, Some("other"), &["x"]),
+            now,
+        )
+        .unwrap();
+        let albums = album_qualities(conn, Some("rg")).unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].quality, mp3(192));
+        assert_eq!(albums[0].dirs, ["/music/a/cd1", "/music/a/cd2"]);
+        assert_eq!(albums[0].release_mbids, ["r1"]);
+        assert_eq!(album_qualities(conn, None).unwrap().len(), 2);
+        // A better copy in another library: that's the one that counts.
+        let mut f = file("/flac/a/1.flac", None, Some("rg"), &["x"]);
+        f.library = "/flac".into();
+        f.quality = Quality {
+            format: "FLAC".into(),
+            lossless: true,
+            ..Quality::default()
+        };
+        upsert_file(conn, &f, now).unwrap();
+        let albums = album_qualities(conn, Some("rg")).unwrap();
+        assert!(albums[0].quality.lossless);
+        assert_eq!(albums[0].dirs, ["/flac/a"]);
+        remove_files(conn, &["/flac/a/1.flac".into()]).unwrap();
+        assert_eq!(remove_files_under(conn, "/music/a/").unwrap(), 2);
+        assert!(album_qualities(conn, Some("rg")).unwrap().is_empty());
     }
 
     #[test]

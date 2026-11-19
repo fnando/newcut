@@ -27,6 +27,18 @@ pub struct Download {
     /// Where its files went.
     pub filed_to: Option<String>,
     pub queued_at: Timestamp,
+    /// It's an upgrade of an album you have.
+    pub upgrade: Option<Upgrade>,
+}
+
+/// What an upgrade replaces.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Upgrade {
+    /// The album's folders.
+    pub replaces: Vec<String>,
+    /// The album's quality, and the folder's ("MP3 192 kbps").
+    pub from: String,
+    pub to: String,
 }
 
 /// Still downloading, or slskd couldn't get every file (it may yet).
@@ -95,7 +107,8 @@ pub fn add(conn: &Connection, new: &NewDownload, now: Timestamp) -> rusqlite::Re
 }
 
 const COLUMNS: &str = "id, release_key, username, dir, files, queued_at, release_mbid,
-    release_label, match_kind, match_reason, tracks, destination, state, state_detail, filed_to";
+    release_label, match_kind, match_reason, tracks, destination, state, state_detail, filed_to,
+    replaces, upgrade_from, upgrade_to";
 
 fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Download> {
     let files: String = row.get(4)?;
@@ -118,6 +131,14 @@ fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Download> {
         state: row.get(12)?,
         detail: row.get(13)?,
         filed_to: row.get(14)?,
+        upgrade: match row.get::<_, Option<String>>(15)? {
+            Some(replaces) => Some(Upgrade {
+                replaces: serde_json::from_str(&replaces).unwrap_or_default(),
+                from: row.get::<_, Option<String>>(16)?.unwrap_or_default(),
+                to: row.get::<_, Option<String>>(17)?.unwrap_or_default(),
+            }),
+            None => None,
+        },
     })
 }
 
@@ -130,6 +151,20 @@ fn select(
         "SELECT {COLUMNS} FROM downloads {filter} ORDER BY queued_at DESC, id DESC"
     ))?;
     stmt.query_map(args, from_row)?.collect()
+}
+
+/// Make download `id` an upgrade.
+///
+/// # Errors
+///
+/// On database errors.
+pub fn set_upgrade(conn: &Connection, id: i64, upgrade: &Upgrade) -> rusqlite::Result<()> {
+    let replaces = serde_json::to_string(&upgrade.replaces).expect("paths serialize");
+    conn.execute(
+        "UPDATE downloads SET replaces = ?2, upgrade_from = ?3, upgrade_to = ?4 WHERE id = ?1",
+        params![id, replaces, upgrade.from, upgrade.to],
+    )?;
+    Ok(())
 }
 
 /// The folders queued for `release_key`, latest first.

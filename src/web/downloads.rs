@@ -51,6 +51,8 @@ struct Row {
     /// Where its files are now: in slskd's downloads folder, or filed.
     path: Option<String>,
     queued_at: String,
+    /// It's an upgrade: from what, to what.
+    upgrade: Option<String>,
 }
 
 /// The Downloads page.
@@ -104,6 +106,7 @@ pub(super) async fn page(State(web): State<Arc<Web>>) -> Result<Response, WebErr
             match_reason: d.matched.reason.clone(),
             path,
             queued_at: local(d.queued_at),
+            upgrade: super::download::upgrade_label(&d),
             state: d.state,
         }
     };
@@ -284,6 +287,7 @@ pub(super) async fn file(
     )
     .await;
     let filed_to = filed.as_ref().ok().cloned();
+    let download_for_upgrade = download.upgrade.is_some().then(|| download.clone());
     web.db(move |conn, _, _| {
         downloads::set_matched(conn, id, &matched)?;
         match filed {
@@ -303,21 +307,41 @@ pub(super) async fn file(
     if let Some(dir) = filed_to {
         crate::jellyfin::tell(&found.1, std::slice::from_ref(&dir)).await;
         // Its folder now (not at the next full scan): it's yours right away.
-        let path = web.db.clone();
-        let home = web.dirs.home.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut state = crate::state::State::open(&path)?;
-            let (_, loaded) = crate::config::store::load_current(&state.conn, &home)?;
-            crate::scan::scan_new_album(&mut state.conn, &loaded.libraries, &dir)
-        })
-        .await
-        .map_err(|e| WebError(anyhow::anyhow!(e)))?
-        .map_err(WebError)?;
+        scan_filed(&web, dir, download_for_upgrade).await?;
         // Scanned: its rows can say it's yours.
         super::download::announce(&key, FILED);
         web.wakes.wake(Service::Resolver);
     }
     Ok(refresh())
+}
+
+/// Scan album folder `dir`, just filed (from `upgrade`, when it's one:
+/// what it replaced is gone).
+async fn scan_filed(
+    web: &Arc<Web>,
+    dir: std::path::PathBuf,
+    upgrade: Option<Download>,
+) -> Result<(), WebError> {
+    let path = web.db.clone();
+    let home = web.dirs.home.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut state = crate::state::State::open(&path)?;
+        let (_, loaded) = crate::config::store::load_current(&state.conn, &home)?;
+        crate::scan::scan_new_album(&mut state.conn, &loaded.libraries, &dir)?;
+        if let Some(upgrade) = upgrade {
+            crate::upgrade::filed(
+                &mut state.conn,
+                &loaded,
+                &upgrade,
+                &dir.display().to_string(),
+                jiff::Timestamp::now(),
+            )?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| WebError(anyhow::anyhow!(e)))?
+    .map_err(WebError)
 }
 
 /// Cancel download `id` (still downloading, or failed): its files in

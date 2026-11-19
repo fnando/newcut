@@ -26,6 +26,7 @@
           {% else if d.state == "handled" %}<span class="pill st-other">Dealt with</span>
           {% else if d.state == "cancelled" %}<span class="pill st-other">Cancelled</span>
           {% else %}<span class="pill st-upcoming">Downloading</span>{% endif %}
+          {% if let Some(upgrade) = d.upgrade %}<span class="pill st-other" title="It replaces the copy you have">Upgrade: {{ upgrade }}</span>{% endif %}
           {% if d.match_kind == "exact" %}<span>Matches {{ d.release.as_deref().unwrap_or_default() }}</span>
           {% else if d.match_kind == "chosen" %}<span>Tagged as {{ d.release.as_deref().unwrap_or_default() }}</span>
           {% else if d.state == "manual" %}

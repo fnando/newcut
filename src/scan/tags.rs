@@ -1,10 +1,11 @@
 //! The tags newcut reads from an audio file: the MusicBrainz ids MusicBrainz
-//! Picard writes, and the album and album artist names.
+//! Picard writes, the album and album artist names, and the audio's
+//! quality.
 
 use std::path::Path;
 
 use lofty::config::ParseOptions;
-use lofty::file::TaggedFileExt;
+use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::{ItemKey, Tag};
 
@@ -16,9 +17,10 @@ pub struct Tags {
     pub release_group_mbid: Option<String>,
     /// The album artists (`MUSICBRAINZ_ALBUMARTISTID`), else the track's.
     pub artist_mbids: Vec<String>,
+    pub quality: crate::quality::Quality,
 }
 
-/// Read a file's tags (not its audio properties or pictures).
+/// Read a file's tags and audio properties (not its pictures).
 ///
 /// # Errors
 ///
@@ -28,12 +30,13 @@ pub fn read(path: &Path) -> Result<Tags, String> {
         .and_then(|p| {
             p.options(
                 ParseOptions::new()
-                    .read_properties(false)
+                    .read_properties(true)
                     .read_cover_art(false),
             )
             .read()
         })
         .map_err(|e| e.to_string())?;
+    let quality = quality(path, file.file_type(), file.properties());
     let tags = file.tags();
     let first = |key: ItemKey| {
         tags.iter()
@@ -50,7 +53,40 @@ pub fn read(path: &Path) -> Result<Tags, String> {
         artist_mbids: ids(ItemKey::MusicBrainzReleaseArtistId)
             .or_else(|| ids(ItemKey::MusicBrainzArtistId))
             .unwrap_or_default(),
+        quality,
     })
+}
+
+/// The audio's quality, from its properties.
+fn quality(
+    path: &Path,
+    kind: FileType,
+    properties: &lofty::properties::FileProperties,
+) -> crate::quality::Quality {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let lossless = match kind {
+        FileType::Flac | FileType::Wav | FileType::Aiff | FileType::WavPack | FileType::Ape => true,
+        // ALAC says its bit depth; AAC doesn't.
+        FileType::Mp4 => properties.bit_depth().is_some(),
+        FileType::Custom(_) => crate::quality::lossless_extension(&extension),
+        _ => false,
+    };
+    let format = match (kind, lossless) {
+        (FileType::Mp4, true) => "ALAC".to_string(),
+        (FileType::Mp4, false) => "AAC".to_string(),
+        _ => extension.to_ascii_uppercase(),
+    };
+    crate::quality::Quality {
+        format,
+        lossless,
+        bit_depth: properties.bit_depth().map(u32::from),
+        sample_rate: properties.sample_rate(),
+        bitrate: properties.audio_bitrate().filter(|b| *b > 0),
+    }
 }
 
 /// The MusicBrainz ids in a tag's values (several values, or one with ids

@@ -5,7 +5,7 @@ mod common;
 use common::audio;
 use lofty::file::TaggedFileExt;
 use lofty::tag::{Accessor, ItemKey};
-use newcut::import::{Filing, file};
+use newcut::import::{Filing, Replacing, file};
 use newcut::musicbrainz::{Credit, ReleaseInfo, TrackInfo};
 
 fn release() -> ReleaseInfo {
@@ -73,6 +73,7 @@ fn tags_names_and_moves_a_download() {
         release: &release,
         template: &template,
         partial: false,
+        replacing: None,
     };
     let album = file(&filing).unwrap();
     assert_eq!(
@@ -145,6 +146,7 @@ fn what_came_of_a_download_can_be_filed_when_you_say_so() {
         release: &release,
         template: &template,
         partial: false,
+        replacing: None,
     };
     let error = file(&filing).unwrap_err();
     assert!(error.contains("isn't there"), "{error}");
@@ -157,4 +159,125 @@ fn what_came_of_a_download_can_be_filed_when_you_say_so() {
     // Nothing at all: nothing to file.
     let error = file(&filing).unwrap_err();
     assert!(error.contains("none of its files"), "{error}");
+}
+
+#[test]
+fn an_upgrade_sets_the_album_it_replaces_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let source = root.join("downloads/newcut/abc");
+    audio(&source.join("01.flac"), "flac", &[]);
+    audio(&source.join("02.flac"), "flac", &[]);
+    // What you had: MP3s somewhere else, with a cover.
+    let old = root.join("music/old/Future Nausea [MP3]");
+    audio(&old.join("01 future nausea.mp3"), "mp3", &[]);
+    audio(&old.join("02 good american.mp3"), "mp3", &[]);
+    std::fs::write(old.join("cover.jpg"), b"jpg").unwrap();
+    let files = vec![
+        ("@@x\\Album\\01.flac".to_string(), 1),
+        ("@@x\\Album\\02.flac".to_string(), 1),
+    ];
+    let tracks = vec![Some("track-1".to_string()), Some("track-2".to_string())];
+    let template = format!("{}/music/%{{album}}", root.display());
+    let release = release();
+    let replaced = [old.clone()];
+    let trash = root.join("replaced/1-rg");
+    let filing = Filing {
+        source: source.clone(),
+        files: &files,
+        tracks: &tracks,
+        release: &release,
+        template: &template,
+        partial: false,
+        replacing: Some(Replacing {
+            dirs: &replaced,
+            trash: trash.clone(),
+        }),
+    };
+    let album = file(&filing).unwrap();
+    assert!(album.join("1. Future Nausea.flac").is_file());
+    assert!(!old.exists(), "the old folder went along");
+    let aside = trash.join("Future Nausea [MP3]");
+    assert!(aside.join("01 future nausea.mp3").is_file());
+    assert!(aside.join("cover.jpg").is_file());
+}
+
+#[test]
+fn an_upgrade_in_the_same_folder_keeps_the_rest_of_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let source = root.join("downloads/newcut/abc");
+    audio(&source.join("01.mp3"), "mp3", &[]);
+    audio(&source.join("02.mp3"), "mp3", &[]);
+    let album = root.join("music/Future Nausea");
+    // The same names: a better MP3.
+    audio(&album.join("1. Future Nausea.mp3"), "mp3", &[]);
+    audio(&album.join("2. Good American.mp3"), "mp3", &[]);
+    std::fs::write(album.join("cover.jpg"), b"jpg").unwrap();
+    let files = vec![
+        ("@@x\\Album\\01.mp3".to_string(), 1),
+        ("@@x\\Album\\02.mp3".to_string(), 1),
+    ];
+    let tracks = vec![Some("track-1".to_string()), Some("track-2".to_string())];
+    let template = format!("{}/music/%{{album}}", root.display());
+    let release = release();
+    let replaced = [album.clone()];
+    let trash = root.join("replaced/1-rg");
+    let filing = Filing {
+        source: source.clone(),
+        files: &files,
+        tracks: &tracks,
+        release: &release,
+        template: &template,
+        partial: false,
+        replacing: Some(Replacing {
+            dirs: &replaced,
+            trash: trash.clone(),
+        }),
+    };
+    assert_eq!(file(&filing).unwrap(), album);
+    assert!(album.join("1. Future Nausea.mp3").is_file());
+    assert!(album.join("cover.jpg").is_file(), "the cover stays");
+    assert!(trash.join("Future Nausea/1. Future Nausea.mp3").is_file());
+    assert!(!source.exists());
+}
+
+#[test]
+fn an_upgrade_that_cant_be_filed_puts_the_old_files_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let source = root.join("downloads/newcut/abc");
+    audio(&source.join("01.flac"), "flac", &[]);
+    audio(&source.join("02.flac"), "flac", &[]);
+    let old = root.join("music/old");
+    audio(&old.join("1.mp3"), "mp3", &[]);
+    // Its place is taken by something that isn't the album replaced.
+    let album = root.join("music/Future Nausea");
+    audio(&album.join("1. Future Nausea.flac"), "flac", &[]);
+    let files = vec![
+        ("@@x\\Album\\01.flac".to_string(), 1),
+        ("@@x\\Album\\02.flac".to_string(), 1),
+    ];
+    let tracks = vec![Some("track-1".to_string()), Some("track-2".to_string())];
+    let template = format!("{}/music/%{{album}}", root.display());
+    let release = release();
+    let replaced = [old.clone()];
+    let trash = root.join("replaced/1-rg");
+    let filing = Filing {
+        source: source.clone(),
+        files: &files,
+        tracks: &tracks,
+        release: &release,
+        template: &template,
+        partial: false,
+        replacing: Some(Replacing {
+            dirs: &replaced,
+            trash: trash.clone(),
+        }),
+    };
+    let error = file(&filing).unwrap_err();
+    assert!(error.contains("is there already"), "{error}");
+    assert!(old.join("1.mp3").is_file(), "put back");
+    assert!(source.join("01.flac").is_file());
+    assert!(!trash.exists(), "nothing left in the trash");
 }

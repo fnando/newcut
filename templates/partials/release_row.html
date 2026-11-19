@@ -7,6 +7,7 @@
       <span class="pill st-{{ row.status }}">{{ row.label }}</span>
       {% if row.is_new %}<span class="badge-new">New</span>{% endif %}
       {% if let Some(badge) = row.queued %}<a class="st-{{ badge.class }}" href="{{ badge.page }}" title="{{ badge.hint }}">{{ badge.label }}</a>{% endif %}
+      {% if let Some(quality) = row.quality %}<span title="Its worst file's quality">{{ quality }}</span>{% endif %}
       <span>{{ row.kind }}</span>
       <span>{{ row.date.as_deref().unwrap_or("Date unknown") }}</span>
       {% for dir in row.owned_in %}<code title="Where you have it">{{ dir }}</code>{% endfor %}
@@ -14,6 +15,13 @@
   </div>
   <div class="row-side">
     <a class="btn small" href="{{ row.link }}" target="_blank" rel="noopener">{{ row.link_label }}</a>
+    {% if let Some(upgrade) = row.upgrade %}
+      {% if upgrade.requested %}
+      <button class="small" disabled title="The upgrader looks for it next">Upgrade asked</button>
+      {% else %}
+      <button class="small" hx-post="{{ upgrade.path }}" title="{{ upgrade.hint }}">Upgrade</button>
+      {% endif %}
+    {% endif %}
     {% if let Some(path) = row.ignore_path %}
       {% if row.status == "ignored" %}
       <button class="small" hx-post="{{ path }}/unignore">Unignore</button>

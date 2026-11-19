@@ -75,7 +75,8 @@
         "fresh": "1d",
         "new_window": "8w4d",
         "notification": "1d",
-        "scan": "6h"
+        "scan": "6h",
+        "upgrade": "1d"
       }
     },
     "server": {
@@ -95,6 +96,17 @@
         "enabled": false,
         "output_dir": null,
         "server": "http://localhost:5030"
+      }
+    },
+    "upgrade": {
+      "$ref": "#/$defs/UpgradeConfig",
+      "default": {
+        "enabled": false,
+        "notify": false,
+        "per_run": 5,
+        "replaced_dir": null,
+        "retry": "2w",
+        "target": "lossless"
       }
     },
     "version": {
@@ -380,6 +392,11 @@
           "description": "Scan the libraries.",
           "$ref": "#/$defs/Duration",
           "default": "6h"
+        },
+        "upgrade": {
+          "description": "Look for upgrades of albums below `upgrade.target`.",
+          "$ref": "#/$defs/Duration",
+          "default": "1d"
         }
       },
       "additionalProperties": false
@@ -474,6 +491,26 @@
         }
       ]
     },
+    "Tier": {
+      "description": "A quality level, worst first.",
+      "oneOf": [
+        {
+          "description": "Lossy at 320 kbps.",
+          "type": "string",
+          "const": "320"
+        },
+        {
+          "description": "Lossless, 16-bit (as on CDs).",
+          "type": "string",
+          "const": "lossless"
+        },
+        {
+          "description": "Lossless, 24-bit.",
+          "type": "string",
+          "const": "hi-res"
+        }
+      ]
+    },
     "TitlePatterns": {
       "description": "Regular expressions (Rust syntax; `(?i)` ignores case)",
       "type": "array",
@@ -481,6 +518,48 @@
         "type": "string",
         "format": "regex"
       }
+    },
+    "UpgradeConfig": {
+      "description": "Upgrades: albums you have below `target` are searched for on slskd\nagain, and replaced by a better folder (the one closest to `target`\nthat meets it, or else the best one that's better than yours).",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Look for better copies of the albums you have (needs slskd's\n`downloads_dir` and `output_dir`).",
+          "type": "boolean",
+          "default": false
+        },
+        "notify": {
+          "description": "Tell you (through the `[notification]` channels) when an album is\nupgraded.",
+          "type": "boolean",
+          "default": false
+        },
+        "per_run": {
+          "description": "Albums searched for each run, at most (Soulseek doesn't like many\nsearches).",
+          "type": "integer",
+          "format": "uint32",
+          "default": 5,
+          "minimum": 0
+        },
+        "replaced_dir": {
+          "description": "Where the files an upgrade replaces go (`~` and `$VAR` are\nexpanded); newcut's data folder's `replaced` by default.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "retry": {
+          "description": "How long before an album that couldn't be upgraded is searched for\nagain.",
+          "$ref": "#/$defs/Duration",
+          "default": "2w"
+        },
+        "target": {
+          "description": "The quality to aim for: `\"320\"` (lossy at 320 kbps), `\"lossless\"`\n(16-bit, as on CDs) or `\"hi-res\"` (24-bit lossless).",
+          "$ref": "#/$defs/Tier",
+          "default": "lossless"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

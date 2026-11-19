@@ -86,6 +86,27 @@ api_key = "$SLSKD_API_KEY"
 # args = ["--quiet", "--dir", "%{album_dir}"]
 # timeout = "10m"
 
+[upgrade]
+# Look for better copies of the albums you have (needs slskd, with
+# downloads_dir and output_dir). Albums below `target` (their worst file's
+# quality) are searched for on Soulseek every `schedule.upgrade`, and the
+# exact match closest to `target` is downloaded to replace them; when
+# nothing meets it, the best one that's better than yours.
+enabled = false
+# "320" (lossy at 320 kbps), "lossless" (16-bit, as on CDs) or "hi-res"
+# (24-bit lossless).
+target = "lossless"
+# Albums searched for each run, at most (Soulseek doesn't like many
+# searches).
+per_run = 5
+# How long before an album that couldn't be upgraded is searched for again.
+retry = "14d"
+# Tell you (through the [notification] channels) when an album is upgraded.
+notify = false
+# Where the files an upgrade replaces go (you delete them); by default,
+# newcut's data folder's `replaced` (~/.local/share/newcut/replaced).
+# replaced_dir = "~/.local/share/newcut/replaced"
+
 [jellyfin]
 # Tell Jellyfin (https://jellyfin.org) about the albums newcut files, so it
 # scans them right away.
@@ -108,6 +129,8 @@ fresh = "1d"
 new_window = "60d"
 # Send notifications of what's new (when a channel below is set up).
 notification = "1d"
+# Look for upgrades of albums below `upgrade.target`.
+upgrade = "1d"
 
 [notification]
 # What to tell you about: "missing" (new releases you don't have) or "all"

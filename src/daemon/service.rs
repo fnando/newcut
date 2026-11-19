@@ -32,18 +32,21 @@ pub enum Service {
     Notifier,
     /// Tags and files finished slskd downloads.
     Importer,
+    /// Looks for better copies of albums below `upgrade.target`.
+    Upgrader,
     /// The web UI (when `server.enabled`).
     Server,
 }
 
 impl Service {
-    pub const ALL: [Service; 7] = [
+    pub const ALL: [Service; 8] = [
         Service::Scanner,
         Service::Resolver,
         Service::Discography,
         Service::Fresh,
         Service::Notifier,
         Service::Importer,
+        Service::Upgrader,
         Service::Server,
     ];
 
@@ -56,6 +59,7 @@ impl Service {
             Service::Fresh => "fresh",
             Service::Notifier => "notifier",
             Service::Importer => "importer",
+            Service::Upgrader => "upgrader",
             Service::Server => "server",
         }
     }
@@ -69,6 +73,7 @@ impl Service {
             Service::Fresh => "Checks ListenBrainz's fresh releases",
             Service::Notifier => "Sends notifications of new releases",
             Service::Importer => "Tags and files finished slskd downloads",
+            Service::Upgrader => "Looks for better copies of your albums",
             Service::Server => "Serves this web UI",
         }
     }
@@ -88,6 +93,7 @@ pub struct Wakes {
     fresh: Notify,
     notifier: Notify,
     importer: Notify,
+    upgrader: Notify,
     server: Notify,
 }
 
@@ -101,6 +107,7 @@ impl Wakes {
             Service::Fresh => &self.fresh,
             Service::Notifier => &self.notifier,
             Service::Importer => &self.importer,
+            Service::Upgrader => &self.upgrader,
             Service::Server => &self.server,
         }
     }
@@ -232,6 +239,7 @@ pub fn enabled(service: Service, config: &crate::config::Config) -> bool {
                 && config.slskd.downloads_dir.is_some()
                 && config.slskd.output_dir.is_some()
         }
+        Service::Upgrader => config.upgrade.enabled && enabled(Service::Importer, config),
         Service::Scanner | Service::Resolver | Service::Discography => true,
     }
 }
@@ -283,7 +291,7 @@ async fn worker(app: &App, service: Service, mut signals: Signals) -> anyhow::Re
         let wait = if due
             && matches!(
                 service,
-                Service::Scanner | Service::Fresh | Service::Notifier
+                Service::Scanner | Service::Fresh | Service::Notifier | Service::Upgrader
             ) {
             // Just did it: the next is a full interval away.
             wait.max(schedule::CHECK_EVERY)
@@ -350,6 +358,15 @@ async fn run(
             }
             result.map(|(summary, _)| summary)
         }
+        Service::Upgrader => {
+            let result = work.upgrade().await;
+            if result.is_ok() && !work.shutdown.is_stopping() {
+                store::set_time(&work.state.conn, store::LAST_UPGRADE, Timestamp::now())?;
+                // Queued: the importer follows them.
+                wake.wake(Service::Importer);
+            }
+            result
+        }
         Service::Server => unreachable!("the server is no worker"),
     })
 }
@@ -360,6 +377,7 @@ fn last_key(service: Service) -> Option<&'static str> {
         Service::Scanner => Some(store::LAST_SCAN),
         Service::Fresh => Some(store::LAST_FRESH),
         Service::Notifier => Some(store::LAST_NOTIFY),
+        Service::Upgrader => Some(store::LAST_UPGRADE),
         _ => None,
     }
 }
@@ -404,6 +422,22 @@ fn due_now(
             loaded.import.is_some() && !crate::state::downloads::pending(&state.conn)?.is_empty(),
             schedule::CHECK_EVERY,
         ),
+        Service::Upgrader => {
+            let (due, wait) = periodic(
+                state,
+                store::LAST_UPGRADE,
+                loaded.config.schedule.upgrade.0,
+                now,
+            )?;
+            // Not before the scanner read what you have; one you asked for
+            // right away.
+            let scanned = store::get_time(&state.conn, store::LAST_SCAN)?.is_some();
+            let asked = crate::state::upgrades::any_requested(&state.conn)?;
+            (
+                (due && scanned) || asked,
+                if scanned { wait } else { schedule::CHECK_EVERY },
+            )
+        }
         Service::Server => unreachable!("the server is no worker"),
     })
 }

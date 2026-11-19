@@ -12,6 +12,7 @@
           {% else if d.match_kind == "likely" %}<span class="pill st-upcoming">Likely {{ d.release.as_deref().unwrap_or_default() }}</span>{% if let Some(why) = d.match_reason %}<span>{{ why }}</span>{% endif %}
           {% else if let Some(why) = d.match_reason %}<span class="pill st-missing">No exact match</span><span>{{ why }}</span>
           {% else %}<span class="pill st-other">Not matched</span>{% endif %}
+          {% if let Some(upgrade) = d.upgrade %}<span class="pill st-other" title="It replaces the copy you have">Upgrade: {{ upgrade }}</span>{% endif %}
         </div>
         <div class="meta">
           {% if d.state != "cancelled" %}<span class="pill {% match d.status %}{% when Some("ok") %}st-owned{% when Some("active") %}st-upcoming{% when Some("queued") %}st-other{% when Some(_) %}st-missing{% when None %}st-other{% endmatch %}">{{ d.label }}</span>{% endif %}

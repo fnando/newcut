@@ -315,7 +315,7 @@ impl Work<'_> {
             std::collections::HashMap::new();
         let (mut filed, mut manual, mut downloading, mut unknown) = (0, 0, 0, 0);
         let mut needs_you = Vec::new();
-        let mut filed_dirs: Vec<(String, String)> = Vec::new();
+        let mut filed_dirs: Vec<(downloads::Download, String)> = Vec::new();
         for download in pending {
             if self.shutdown.is_stopping() {
                 break;
@@ -379,7 +379,7 @@ impl Work<'_> {
                     let dir = dir.display().to_string();
                     tracing::info!("filed {} into {dir}", download.dir);
                     set(FILED, None, Some(&dir))?;
-                    filed_dirs.push((download.release_key.clone(), dir));
+                    filed_dirs.push((download.clone(), dir));
                     filed += 1;
                 }
                 Err(why) => {
@@ -392,21 +392,29 @@ impl Work<'_> {
                 }
             }
         }
-        self.after_filing(filed_dirs).await?;
-        let told = self.tell_about_downloads(needs_you).await;
+        let told_upgrades = self.after_filing(filed_dirs).await?;
+        let told = match (self.tell_about_downloads(needs_you).await, told_upgrades) {
+            (Some(a), Some(b)) => Some(format!("{a}; upgrades: {b}")),
+            (a, b) => a.or(b),
+        };
         let summary = import_summary(filed, manual, downloading, unknown, told);
         Ok((summary, filed))
     }
 
-    /// The album folders just filed (with their release groups): told to
-    /// Jellyfin, and scanned.
-    async fn after_filing(&mut self, filed_dirs: Vec<(String, String)>) -> anyhow::Result<()> {
+    /// The album folders just filed (with their downloads): told to
+    /// Jellyfin, and scanned; then what upgrades replaced is forgotten.
+    /// Returns what telling you of upgrades did.
+    async fn after_filing(
+        &mut self,
+        filed_dirs: Vec<(crate::state::downloads::Download, String)>,
+    ) -> anyhow::Result<Option<String>> {
         use crate::state::downloads::FILED;
         // Jellyfin first: scanning ours takes a while.
         let dirs: Vec<std::path::PathBuf> = filed_dirs.iter().map(|(_, d)| d.into()).collect();
         crate::jellyfin::tell(self.loaded, &dirs).await;
         // Scanned now (not at the next full scan): it's yours right away.
-        for (key, dir) in filed_dirs {
+        let mut upgraded = Vec::new();
+        for (download, dir) in filed_dirs {
             crate::scan::scan_new_album(
                 &mut self.state.conn,
                 &self.loaded.libraries,
@@ -414,11 +422,14 @@ impl Work<'_> {
             )?;
             // Scanned: pages showing it can say it's yours.
             emit(Event::Download {
-                key,
+                key: download.release_key.clone(),
                 state: FILED.into(),
             });
+            if download.upgrade.is_some() {
+                upgraded.push((download, dir));
+            }
         }
-        Ok(())
+        self.after_upgrades(upgraded).await
     }
 
     /// Download `failed` failed: queue another source for its album (the
@@ -431,6 +442,12 @@ impl Work<'_> {
     ) -> anyhow::Result<Option<String>> {
         use crate::state::downloads::{self, FAILED};
         let key = &failed.release_key;
+        if failed.upgrade.is_some() {
+            // Another source at the upgrader's next run; nothing you need
+            // to know.
+            crate::state::upgrades::again(&self.state.conn, key, "its download failed")?;
+            return Ok(None);
+        }
         let all = downloads::for_release(&self.state.conn, key)?;
         if all.iter().any(|d| d.id > failed.id) {
             // Another's been queued since.
@@ -512,9 +529,22 @@ impl Work<'_> {
         let url = server
             .enabled
             .then(|| format!("http://{}/downloads", server.listen));
+        let messages = notes
+            .into_iter()
+            .map(|note| crate::notify::download_message(note, url.clone()))
+            .collect();
+        self.tell(messages).await
+    }
+
+    /// Send `messages` through every notification channel that's on.
+    /// Returns what happened, when there was something to tell.
+    pub(crate) async fn tell(&self, messages: Vec<crate::notify::Message>) -> Option<String> {
+        let channels = self.loaded.config.notification.channels();
+        if messages.is_empty() || channels.is_empty() {
+            return None;
+        }
         let (mut sent, mut failed) = (0, 0);
-        for note in notes {
-            let message = crate::notify::download_message(note, url.clone());
+        for message in messages {
             for channel in &channels {
                 match self.send(channel, &message).await {
                     Ok(()) => sent += 1,

@@ -177,6 +177,42 @@ A download that's still going (or failed) can be cancelled from the
 Downloads page or the album's: its files are cancelled in slskd, and the
 folder newcut had slskd put them in is deleted.
 
+### Upgrades
+
+With slskd filing downloads (`downloads_dir` and `output_dir`), newcut can
+also replace albums you have with better copies. Each album is as good as its
+worst file; with copies in more than one library (a lossy one for your phone,
+say), its best copy counts, and only that one is replaced: `320` is lossy at 320 kbps, `lossless` is 16-bit lossless (as on
+CDs), `hi-res` is 24-bit lossless. Every `schedule.upgrade` (`1d`), the
+`upgrader` searches Soulseek for up to `per_run` albums below `target`. For
+each, it queues the folder that matches one of the album's releases exactly
+(yours first) and is closest to `target` while meeting it. When none meets it,
+it queues the best one that's still better than yours. An album with nothing
+better is searched for again after `retry`, and so is one upgraded to
+something still below `target`.
+
+```toml
+[upgrade]
+enabled = true
+target = "lossless"   # "320", "lossless" or "hi-res"
+per_run = 5           # albums searched each run
+retry = "14d"
+notify = true         # tell you when an album is upgraded
+# replaced_dir = "~/.local/share/newcut/replaced"
+```
+
+The importer files an upgrade like any other download, but first moves the
+files it replaces into `replaced_dir`, in a folder of their own
+(`20261119-101500-<release group>/<album folder>`). A replaced folder left
+without audio goes there too, with its covers and the rest. If filing fails,
+they're put back. newcut never deletes them: that's up to you. When an
+upgrade's download fails, the next run tries another folder, without telling
+you.
+
+Album rows show each album's quality. On the artist's page, an album below
+`target` has an "Upgrade" button, which has the `upgrader` look for it right
+away. Ignored albums aren't upgraded.
+
 To have [Jellyfin](https://jellyfin.org) scan the albums newcut files right
 away, give it Jellyfin's address and an API key (Dashboard → API Keys). When
 Jellyfin sees your folders under other paths (it runs in a container, say),
@@ -302,6 +338,12 @@ the Downloads page as its link. The command gets those with `"kind":
 `release_group_mbid`, `folder`, `username`, `reason`); release
 notifications say `"kind": "releases"`.
 
+With `upgrade.notify`, albums upgraded are told right away too: "Upgraded:
+Radiohead", "OK Computer: MP3 192 kbps → FLAC 16-bit/44.1 kHz." (several at
+once: "3 albums upgraded"). The command gets those with `"kind": "upgrade"`
+and an `upgrades` array (`album`, `artist`, `release_group_mbid`, `from`,
+`to`, `folder`).
+
 Each channel keeps when it last heard from newcut. Its first run only starts
 that clock, so turning notifications on doesn't send what's already new; one
 that fails (Pushover down, your script exiting with an error) hears the same
@@ -352,11 +394,12 @@ Pushover's keys are masked in the web UI's config editor, like
 
 ## Keeping it running
 
-`newcut run` starts seven services, each on its own: `scanner` (every
+`newcut run` starts eight services, each on its own: `scanner` (every
 `schedule.scan`), `resolver` (after each scan), `discography`, `fresh`,
 `notifier` (every `schedule.notification`, when a channel is set up),
 `importer` (finished slskd downloads, when `slskd.downloads_dir` and
-`output_dir` are set) and `server`. One that stops unexpectedly is started again (after
+`output_dir` are set), `upgrader` (every `schedule.upgrade`, when
+`upgrade.enabled`) and `server`. One that stops unexpectedly is started again (after
 1 second, then 2, 4, … up to 5 minutes).
 
 ```sh

@@ -77,6 +77,8 @@ pub struct Folder {
     pub format: String,
     /// `24-bit/96 kHz`, `320 kbps`, … when the files say.
     pub quality: Option<String>,
+    /// The same, to compare: its worst file's.
+    pub audio: crate::quality::Quality,
     pub lossless: bool,
     pub free_slot: bool,
     pub queue: u64,
@@ -104,7 +106,7 @@ impl Folder {
     }
 }
 
-const LOSSLESS: [&str; 8] = ["flac", "alac", "wav", "aif", "aiff", "ape", "wv", "dsf"];
+use crate::quality::LOSSLESS;
 
 impl Slskd {
     /// # Errors
@@ -545,6 +547,13 @@ fn folder(response: &Response, dir: &str, files: &[&File]) -> Folder {
             .map(|f| f.length.map(u64::from))
             .sum::<Option<u64>>(),
         quality: quality(files, lossless),
+        audio: crate::quality::Quality {
+            format: main.to_ascii_uppercase(),
+            lossless,
+            bit_depth: files.iter().filter_map(|f| f.bit_depth).min(),
+            sample_rate: files.iter().filter_map(|f| f.sample_rate).min(),
+            bitrate: files.iter().filter_map(|f| f.bit_rate).min(),
+        },
         format,
         lossless,
         free_slot: response.has_free_upload_slot,
@@ -677,6 +686,7 @@ mod tests {
         assert_eq!((best.size, best.length), (120, Some(400)));
         assert_eq!(best.format, "FLAC");
         assert_eq!(best.quality.as_deref(), Some("24-bit/96 kHz"));
+        assert_eq!(best.audio.tier(), crate::quality::Tier::HiRes);
         assert_eq!(folders[1].quality.as_deref(), Some("16-bit/44.1 kHz"));
         assert_eq!(folders[2].format, "MP3");
         assert_eq!(folders[2].quality.as_deref(), Some("256+ kbps"));

@@ -9,6 +9,8 @@ pub const LAST_SCAN: &str = "last_scan_finished_at";
 pub const LAST_FRESH: &str = "last_fresh_finished_at";
 /// When the notifier last ran.
 pub const LAST_NOTIFY: &str = "last_notify_finished_at";
+/// When the upgrader last ran.
+pub const LAST_UPGRADE: &str = "last_upgrade_finished_at";
 
 /// When `channel` was last notified (up to which releases it heard of).
 #[must_use]

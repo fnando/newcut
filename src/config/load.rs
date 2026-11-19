@@ -33,6 +33,9 @@ pub struct ImportPaths {
     pub output: String,
     /// `slskd.after_filing`, its program expanded.
     pub after_filing: Option<AfterFiling>,
+    /// Where the files upgrades replace go (`upgrade.replaced_dir`,
+    /// expanded).
+    pub replaced: PathBuf,
 }
 
 /// A program run on each album folder filed.
@@ -133,19 +136,18 @@ pub fn check_text(text: &str, origin: &str, home: &Path) -> Result<Loaded, Vec<S
         }
     }
     check_covers(&config.covers, &mut error);
-    let import = check_slskd(&config.slskd, home, origin, &mut error, &mut warnings);
+    let replaced = check_replaced_dir(&config.upgrade, home, &mut error);
+    let import = check_slskd(
+        &config.slskd,
+        replaced,
+        home,
+        origin,
+        &mut error,
+        &mut warnings,
+    );
+    check_upgrade(&config.upgrade, import.is_some(), &mut error);
     let jellyfin_paths = check_jellyfin(&config.jellyfin, home, origin, &mut error, &mut warnings);
-    let schedule = &config.schedule;
-    for (key, every) in [
-        ("schedule.scan", schedule.scan),
-        ("schedule.artist", schedule.artist),
-        ("schedule.fresh", schedule.fresh),
-        ("schedule.notification", schedule.notification),
-    ] {
-        if every.0.as_secs() < 60 {
-            error(format!("{key}: use at least \"1m\""));
-        }
-    }
+    check_schedule(&config, &mut error);
 
     let libraries = check_libraries(&config.libraries, home, origin, &mut error, &mut warnings);
     let notify_bin = check_notification(&config, home, origin, &mut error, &mut warnings);
@@ -234,9 +236,69 @@ fn check_covers(covers: &super::CoversConfig, error: &mut impl FnMut(String)) {
     }
 }
 
+/// `[schedule]` (and `upgrade.retry`): a minute at least.
+fn check_schedule(config: &Config, error: &mut impl FnMut(String)) {
+    let schedule = &config.schedule;
+    for (key, every) in [
+        ("schedule.scan", schedule.scan),
+        ("schedule.artist", schedule.artist),
+        ("schedule.fresh", schedule.fresh),
+        ("schedule.notification", schedule.notification),
+        ("schedule.upgrade", schedule.upgrade),
+        ("upgrade.retry", config.upgrade.retry),
+    ] {
+        if every.0.as_secs() < 60 {
+            error(format!("{key}: use at least \"1m\""));
+        }
+    }
+}
+
+/// `[upgrade]`: on only with somewhere to file downloads.
+fn check_upgrade(upgrade: &super::UpgradeConfig, filing: bool, error: &mut impl FnMut(String)) {
+    if upgrade.enabled && !filing {
+        error("upgrade.enabled: upgrades need slskd on, with downloads_dir and output_dir".into());
+    }
+    if upgrade.per_run == 0 {
+        error("upgrade.per_run: use at least 1".into());
+    }
+}
+
+/// `upgrade.replaced_dir`, expanded; newcut's data folder's `replaced`
+/// (`$XDG_DATA_HOME/newcut/replaced`, `~/.local/share/newcut/replaced`)
+/// when it isn't set.
+fn check_replaced_dir(
+    upgrade: &super::UpgradeConfig,
+    home: &Path,
+    error: &mut impl FnMut(String),
+) -> PathBuf {
+    let default = || {
+        std::env::var_os("XDG_DATA_HOME")
+            .filter(|d| !d.is_empty())
+            .map_or_else(|| home.join(".local/share"), PathBuf::from)
+            .join("newcut/replaced")
+    };
+    let Some(dir) = upgrade.replaced_dir.as_deref() else {
+        return default();
+    };
+    match crate::paths::expand(dir, home) {
+        Ok(path) if path.is_absolute() => path,
+        Ok(_) => {
+            error(format!(
+                "upgrade.replaced_dir: {dir:?} must be a full path: start with /, ~ or $VAR"
+            ));
+            default()
+        }
+        Err(e) => {
+            error(format!("upgrade.replaced_dir: {e}"));
+            default()
+        }
+    }
+}
+
 /// `[slskd]`, when it's on: its address, and an API key.
 fn check_slskd(
     slskd: &super::SlskdConfig,
+    replaced: PathBuf,
     home: &Path,
     origin: &str,
     error: &mut impl FnMut(String),
@@ -319,6 +381,7 @@ fn check_slskd(
                 downloads,
                 output: output.to_string_lossy().into_owned(),
                 after_filing,
+                replaced,
             })
         }
         (None, None) if slskd.after_filing.is_none() => None,
@@ -731,5 +794,31 @@ mod tests {
         ] {
             assert!(all.contains(part), "{part} in {all}");
         }
+    }
+
+    #[test]
+    fn upgrades_are_checked() {
+        let errors = check(
+            "version = 1\n[upgrade]\nenabled = true\nper_run = 0\nretry = \"10s\"\n\
+             target = \"hi-res\"\n",
+        )
+        .unwrap_err()
+        .join("\n");
+        for part in [
+            "upgrade.enabled: upgrades need slskd",
+            "upgrade.per_run",
+            "upgrade.retry",
+        ] {
+            assert!(errors.contains(part), "{part} in {errors}");
+        }
+        assert!(check("version = 1\n[upgrade]\ntarget = \"lossy\"\n").is_err());
+        let loaded = check(
+            "version = 1\n[slskd]\nenabled = true\napi_key = \"k\"\n\
+             downloads_dir = \"/d\"\noutput_dir = \"/m/%{album}\"\n\
+             [upgrade]\nenabled = true\ntarget = \"320\"\nreplaced_dir = \"~/old\"\n",
+        )
+        .unwrap();
+        assert_eq!(loaded.config.upgrade.target, crate::quality::Tier::R320);
+        assert!(loaded.import.unwrap().replaced.ends_with("old"));
     }
 }

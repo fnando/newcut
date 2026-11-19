@@ -954,14 +954,20 @@ async fn release_group_action(
     State(web): State<Arc<Web>>,
     Path((mbid, action)): Path<(String, String)>,
 ) -> Result<Response, WebError> {
-    let ignored = match action.as_str() {
-        "ignore" => true,
-        "unignore" => false,
-        _ => return Ok(not_found("such action")),
-    };
     if !crate::scan::tags::is_mbid(&mbid) {
         return Ok(not_found("such release group"));
     }
+    let ignored = match action.as_str() {
+        "ignore" => true,
+        "unignore" => false,
+        "upgrade" => {
+            web.db(move |conn, _, _| crate::upgrade::request(conn, &mbid))
+                .await?;
+            run_now(&web, Service::Upgrader.name()).await?;
+            return Ok(refresh());
+        }
+        _ => return Ok(not_found("such action")),
+    };
     web.db(move |conn, _, _| {
         Ok(library::set_ignored(
             conn,

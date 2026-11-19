@@ -1,7 +1,8 @@
-//! When a download fails: another source for the album, found and queued
-//! without you. A new search is made, and the best folder it finds that's
-//! lossless, matches one of the album's releases exactly, and wasn't tried
-//! for it before is queued.
+//! Folders found and queued without you. When a download fails, another
+//! source for the album: a new search is made, and the best folder it finds
+//! that's lossless, matches one of the album's releases exactly, and wasn't
+//! tried for it before is queued. For an upgrade, the untried exact match
+//! that's better than the album you have, closest to the target quality.
 
 use std::time::Duration;
 
@@ -52,6 +53,39 @@ pub async fn queue_another(
     search: &Search<'_>,
     stopping: &dyn Fn() -> bool,
 ) -> anyhow::Result<Option<Queued>> {
+    search_and_queue(search, stopping, |folders, releases| {
+        pick(folders, releases, search.tried)
+    })
+    .await
+}
+
+/// Search for a better copy of the album (now at `current`), and queue
+/// the untried exact match closest to `target` that meets it, else the best
+/// one better than `current`. Folders that match one of `prefer` (the
+/// releases you have) come first. `None`: nothing better.
+///
+/// # Errors
+///
+/// As [`queue_another`].
+pub async fn queue_upgrade(
+    search: &Search<'_>,
+    current: &crate::quality::Quality,
+    target: crate::quality::Tier,
+    prefer: &[String],
+    stopping: &dyn Fn() -> bool,
+) -> anyhow::Result<Option<Queued>> {
+    search_and_queue(search, stopping, |folders, releases| {
+        pick_upgrade(folders, releases, search.tried, current, target, prefer)
+    })
+    .await
+}
+
+/// Search for the album, and queue the folder `pick` picks.
+async fn search_and_queue(
+    search: &Search<'_>,
+    stopping: &dyn Fn() -> bool,
+    pick: impl FnOnce(Vec<Folder>, &[Release]) -> Option<(Folder, Match)>,
+) -> anyhow::Result<Option<Queued>> {
     let releases = crate::musicbrainz::MusicBrainz {
         http: search.http,
         server: search.musicbrainz_server,
@@ -80,8 +114,8 @@ pub async fn queue_another(
         tokio::time::sleep(POLL_EVERY).await;
     }
     let folders = crate::slskd::folders(&client.responses(&id).await?);
-    let Some((folder, m)) = pick(folders, &releases, search.tried) else {
-        tracing::info!("slskd: no other source for {text:?}");
+    let Some((folder, m)) = pick(folders, &releases) else {
+        tracing::info!("slskd: nothing that'll do for {text:?}");
         return Ok(None);
     };
     let destination = search
@@ -96,7 +130,7 @@ pub async fn queue_another(
         None => client.enqueue(&folder.username, &folder.files).await?,
     }
     tracing::info!(
-        "slskd: queued {} files from {} ({}) for {}, instead",
+        "slskd: queued {} files from {} ({}) for {}",
         folder.files.len(),
         folder.username,
         folder.dir,
@@ -124,6 +158,37 @@ fn pick(
             let m = matching::match_folder(&f.candidates(), releases);
             (m.kind == Kind::Exact).then_some((f, m))
         })
+}
+
+/// The untried exact matches among `folders`, those of `prefer`'s releases
+/// first; of those, the one [`crate::quality::pick`] picks.
+fn pick_upgrade(
+    folders: Vec<Folder>,
+    releases: &[Release],
+    tried: &[(String, String)],
+    current: &crate::quality::Quality,
+    target: crate::quality::Tier,
+    prefer: &[String],
+) -> Option<(Folder, Match)> {
+    let mut exact: Vec<((Folder, Match), crate::quality::Quality)> = folders
+        .into_iter()
+        .filter(|f| !tried.iter().any(|(u, d)| *u == f.username && *d == f.dir))
+        .filter_map(|f| {
+            let m = matching::match_folder(&f.candidates(), releases);
+            (m.kind == Kind::Exact).then(|| {
+                let audio = f.audio.clone();
+                ((f, m), audio)
+            })
+        })
+        .collect();
+    let preferred = |m: &Match| {
+        m.release
+            .and_then(|i| releases.get(i))
+            .is_some_and(|r| prefer.contains(&r.mbid))
+    };
+    // Stable: slskd's order stays within each.
+    exact.sort_by_key(|((_, m), _)| !preferred(m));
+    crate::quality::pick(exact, current, target)
 }
 
 #[cfg(test)]
@@ -188,6 +253,57 @@ mod tests {
                 &[]
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn an_upgrade_is_the_untried_exact_match_closest_to_the_target() {
+        use crate::quality::{Quality, Tier};
+        let with = |mut f: Folder, depth: Option<u32>, kbps: Option<u32>| {
+            f.audio = Quality {
+                format: if f.lossless { "FLAC" } else { "MP3" }.into(),
+                lossless: f.lossless,
+                bit_depth: depth,
+                sample_rate: Some(44_100),
+                bitrate: kbps,
+            };
+            f
+        };
+        let current = Quality {
+            format: "MP3".into(),
+            bitrate: Some(192),
+            ..Quality::default()
+        };
+        let folders = vec![
+            with(folder("ann", "A", true, [200, 180]), Some(24), None),
+            with(folder("bob", "B", false, [200, 180]), None, Some(320)),
+            with(folder("cid", "C", true, [260, 180]), Some(16), None),
+            with(folder("dee", "D", true, [200, 180]), Some(16), None),
+            with(folder("eve", "E", true, [200, 180]), Some(16), None),
+        ];
+        let tried = vec![("dee".to_string(), "D".to_string())];
+        let pick = |target, prefer: &[String]| {
+            pick_upgrade(
+                folders.clone(),
+                &[release()],
+                &tried,
+                &current,
+                target,
+                prefer,
+            )
+            .map(|(f, _)| f.username)
+        };
+        assert_eq!(pick(Tier::Lossless, &[]).as_deref(), Some("eve"));
+        assert_eq!(pick(Tier::HiRes, &[]).as_deref(), Some("ann"));
+        assert_eq!(pick(Tier::R320, &[]).as_deref(), Some("bob"));
+        let better = Quality {
+            lossless: true,
+            bit_depth: Some(24),
+            ..Quality::default()
+        };
+        assert!(
+            pick_upgrade(folders, &[release()], &tried, &better, Tier::HiRes, &[]).is_none(),
+            "nothing beats what you have"
         );
     }
 }

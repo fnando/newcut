@@ -208,6 +208,16 @@ pub struct Filing<'a> {
     pub template: &'a str,
     /// File the files that are there (some never came): you said so.
     pub partial: bool,
+    /// An upgrade: the album folders it replaces, and where their files go.
+    pub replacing: Option<Replacing<'a>>,
+}
+
+/// The album an upgrade replaces.
+pub struct Replacing<'a> {
+    /// Its folders.
+    pub dirs: &'a [PathBuf],
+    /// Where their files go (a folder of their own, made when needed).
+    pub trash: PathBuf,
 }
 
 /// File a finished download: tagged as the release it matched, and moved
@@ -257,6 +267,19 @@ pub async fn file_download(
         .await
         .map_err(|e| format!("couldn't look up the release: {e:#}"))?
         .ok_or_else(|| format!("MusicBrainz doesn't know release {release}"))?;
+    let replaced: Vec<PathBuf> = download
+        .upgrade
+        .as_ref()
+        .map(|u| u.replaces.iter().map(PathBuf::from).collect())
+        .unwrap_or_default();
+    let replacing = download.upgrade.as_ref().map(|_| Replacing {
+        dirs: &replaced,
+        trash: paths.replaced.join(format!(
+            "{}-{}",
+            jiff::Zoned::now().strftime("%Y%m%d-%H%M%S"),
+            download.release_key
+        )),
+    });
     let dir = file(&Filing {
         source: paths.downloads.join(&destination),
         files: &download.files,
@@ -264,6 +287,7 @@ pub async fn file_download(
         release: &info,
         template: &paths.output,
         partial: forced,
+        replacing,
     })?;
     save_cover(http, &info.mbid, &dir).await;
     if let Some(hook) = &paths.after_filing {
@@ -382,7 +406,8 @@ pub fn file(filing: &Filing) -> Result<PathBuf, String> {
             .unwrap_or_default()
             .to_string();
         let to = target.join(track_file_name(release, track, &extension));
-        if to.exists() {
+        // An upgrade's old files are set aside first: checked after.
+        if filing.replacing.is_none() && to.exists() {
             return Err(format!("{} is there already", to.display()));
         }
         moves.push((from, to, track));
@@ -397,15 +422,157 @@ pub fn file(filing: &Filing) -> Result<PathBuf, String> {
         write_tags(from, release, track)
             .map_err(|e| format!("can't tag {}: {e}", from.display()))?;
     }
-    std::fs::create_dir_all(&target)
-        .map_err(|e| format!("can't create {}: {e}", target.display()))?;
-    for (from, to, _) in &moves {
-        move_file(from, to)
-            .map_err(|e| format!("can't move {} to {}: {e}", from.display(), to.display()))?;
+    let aside = match &filing.replacing {
+        Some(replacing) => Some(SetAside::new(replacing)?),
+        None => None,
+    };
+    let undo = |why: String| {
+        if let Some(aside) = &aside {
+            aside.restore();
+        }
+        Err(why)
+    };
+    if let Some(taken) = moves.iter().find(|(_, to, _)| to.exists()) {
+        return undo(format!("{} is there already", taken.1.display()));
+    }
+    if let Err(e) = std::fs::create_dir_all(&target) {
+        return undo(format!("can't create {}: {e}", target.display()));
+    }
+    for (i, (from, to, _)) in moves.iter().enumerate() {
+        if let Err(e) = move_file(from, to) {
+            // Back where they came from, for the old ones to come back.
+            for (from, to, _) in &moves[..i] {
+                let _ = move_file(to, from);
+            }
+            return undo(format!(
+                "can't move {} to {}: {e}",
+                from.display(),
+                to.display()
+            ));
+        }
+    }
+    if let Some(aside) = &aside {
+        aside.finish(&target);
     }
     // Only what newcut asked for was in it; leave it if anything else is.
     let _ = std::fs::remove_dir(&filing.source);
     Ok(target)
+}
+
+/// The audio files an upgrade replaces, moved into its trash folder (each
+/// album folder's into one named after it).
+struct SetAside {
+    /// Each replaced folder, and where its files went.
+    dirs: Vec<(PathBuf, PathBuf)>,
+    /// Each file: where it was, and where it is.
+    moved: Vec<(PathBuf, PathBuf)>,
+    trash: PathBuf,
+}
+
+impl SetAside {
+    fn new(replacing: &Replacing) -> Result<Self, String> {
+        let mut aside = Self {
+            dirs: Vec::new(),
+            moved: Vec::new(),
+            trash: replacing.trash.clone(),
+        };
+        for dir in replacing.dirs.iter().filter(|d| d.is_dir()) {
+            let name = dir
+                .file_name()
+                .map_or_else(|| "album".into(), |n| n.to_string_lossy().into_owned());
+            let mut to = replacing.trash.join(&name);
+            let mut n = 2;
+            while to.exists() || aside.dirs.iter().any(|(_, t)| *t == to) {
+                to = replacing.trash.join(format!("{name} ({n})"));
+                n += 1;
+            }
+            let files = match audio_files(dir) {
+                Ok(files) => files,
+                Err(e) => {
+                    aside.restore();
+                    return Err(format!("can't read {}: {e}", dir.display()));
+                }
+            };
+            if let Err(e) = std::fs::create_dir_all(&to) {
+                aside.restore();
+                return Err(format!("can't create {}: {e}", to.display()));
+            }
+            for file in files {
+                let into = to.join(file.file_name().unwrap_or_default());
+                if let Err(e) = move_file(&file, &into) {
+                    aside.restore();
+                    return Err(format!(
+                        "can't move {} to {}: {e}",
+                        file.display(),
+                        into.display()
+                    ));
+                }
+                aside.moved.push((file, into));
+            }
+            aside.dirs.push((dir.clone(), to));
+        }
+        Ok(aside)
+    }
+
+    /// Put the files back.
+    fn restore(&self) {
+        for (was, is) in self.moved.iter().rev() {
+            if let Err(e) = move_file(is, was) {
+                tracing::error!("can't put {} back in {}: {e}", is.display(), was.display());
+            }
+        }
+        for (_, to) in &self.dirs {
+            let _ = std::fs::remove_dir(to);
+        }
+        let _ = std::fs::remove_dir(&self.trash);
+    }
+
+    /// The new album's in `target`: the replaced folders left without audio
+    /// (but `target`) go along with their files, covers and all.
+    fn finish(&self, target: &Path) {
+        for (dir, to) in &self.dirs {
+            if dir == target || audio_files(dir).is_ok_and(|f| !f.is_empty()) {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let into = to.join(entry.file_name());
+                if !into.exists()
+                    && let Err(e) = std::fs::rename(entry.path(), &into)
+                {
+                    tracing::warn!(
+                        "can't move {} to {}: {e}",
+                        entry.path().display(),
+                        into.display()
+                    );
+                }
+            }
+            let _ = std::fs::remove_dir(dir);
+        }
+        if !self.dirs.is_empty() {
+            tracing::info!("the files replaced are in {}", self.trash.display());
+        }
+    }
+}
+
+/// The audio files right in `dir`.
+fn audio_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_file()
+            && path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| crate::scan::AUDIO.contains(&e.to_ascii_lowercase().as_str()))
+        {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
 }
 
 fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {

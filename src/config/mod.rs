@@ -68,6 +68,8 @@ pub struct Config {
     pub schedule: ScheduleConfig,
     #[serde(default)]
     pub notification: NotificationConfig,
+    #[serde(default)]
+    pub upgrade: UpgradeConfig,
 }
 
 /// The web UI.
@@ -422,6 +424,45 @@ fn after_filing_timeout() -> Every {
     Every(Duration::from_secs(600))
 }
 
+/// Upgrades: albums you have below `target` are searched for on slskd
+/// again, and replaced by a better folder (the one closest to `target`
+/// that meets it, or else the best one that's better than yours).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct UpgradeConfig {
+    /// Look for better copies of the albums you have (needs slskd's
+    /// `downloads_dir` and `output_dir`).
+    pub enabled: bool,
+    /// The quality to aim for: `"320"` (lossy at 320 kbps), `"lossless"`
+    /// (16-bit, as on CDs) or `"hi-res"` (24-bit lossless).
+    pub target: crate::quality::Tier,
+    /// Albums searched for each run, at most (Soulseek doesn't like many
+    /// searches).
+    pub per_run: u32,
+    /// How long before an album that couldn't be upgraded is searched for
+    /// again.
+    pub retry: Every,
+    /// Tell you (through the `[notification]` channels) when an album is
+    /// upgraded.
+    pub notify: bool,
+    /// Where the files an upgrade replaces go (`~` and `$VAR` are
+    /// expanded); newcut's data folder's `replaced` by default.
+    pub replaced_dir: Option<String>,
+}
+
+impl Default for UpgradeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            target: crate::quality::Tier::Lossless,
+            per_run: 5,
+            retry: Every(Duration::from_hours(14 * 24)),
+            notify: false,
+            replaced_dir: None,
+        }
+    }
+}
+
 /// How often each service does its work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -436,6 +477,8 @@ pub struct ScheduleConfig {
     pub new_window: Every,
     /// Send notifications of new releases.
     pub notification: Every,
+    /// Look for upgrades of albums below `upgrade.target`.
+    pub upgrade: Every,
 }
 
 impl Default for ScheduleConfig {
@@ -447,6 +490,7 @@ impl Default for ScheduleConfig {
             fresh: hours(24),
             new_window: hours(60 * 24),
             notification: hours(24),
+            upgrade: hours(24),
         }
     }
 }
@@ -547,5 +591,6 @@ mod tests {
         assert_eq!(config.schedule, ScheduleConfig::default());
         assert_eq!(config.discography, DiscographyConfig::default());
         assert_eq!(config.covers, CoversConfig::default());
+        assert_eq!(config.upgrade, UpgradeConfig::default());
     }
 }

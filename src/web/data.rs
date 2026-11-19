@@ -103,6 +103,23 @@ pub struct Row {
     /// Its latest download, when a folder's been queued in slskd for it.
     #[serde(skip)]
     pub queued: Option<DownloadBadge>,
+    /// Yours: how good it is (its worst file).
+    #[serde(skip)]
+    pub quality: Option<String>,
+    /// Yours, and below `upgrade.target`.
+    #[serde(skip)]
+    pub upgrade: Option<UpgradeView>,
+}
+
+/// What an album row says of its upgrades.
+#[derive(Debug, Clone)]
+pub struct UpgradeView {
+    /// Where asking for one posts.
+    pub path: String,
+    /// You asked; the upgrader hasn't looked yet.
+    pub requested: bool,
+    /// What the last look found.
+    pub hint: String,
 }
 
 impl Row {
@@ -148,6 +165,8 @@ impl Row {
             downloadable: matches!(entry.status, Status::Missing),
             page: None,
             queued: None,
+            quality: None,
+            upgrade: None,
         }
     }
 }
@@ -246,6 +265,10 @@ pub fn rows(
             row.page = Some(page);
         }
     }
+    let owned = rows.iter().any(|r| !r.owned_in.is_empty());
+    if owned {
+        add_qualities(conn, loaded, &mut rows)?;
+    }
     rows.sort_by(|a, b| {
         b.date
             .as_deref()
@@ -254,6 +277,62 @@ pub fn rows(
             .then(a.title.cmp(&b.title))
     });
     Ok((entries, rows))
+}
+
+/// Owned albums' qualities, and what upgrading them is at.
+fn add_qualities(conn: &Connection, loaded: &Loaded, rows: &mut [Row]) -> anyhow::Result<()> {
+    use crate::state::downloads::{DOWNLOADING, MANUAL};
+    let qualities: HashMap<String, crate::quality::Quality> = library::album_qualities(conn, None)?
+        .into_iter()
+        .map(|a| (a.release_group_mbid, a.quality))
+        .collect();
+    let upgrading = loaded.config.upgrade.enabled && enabled(Service::Upgrader, &loaded.config);
+    let checks = if upgrading {
+        crate::state::upgrades::all(conn)?
+    } else {
+        HashMap::new()
+    };
+    let states = crate::state::downloads::release_states(conn)?;
+    for row in rows.iter_mut().filter(|r| !r.owned_in.is_empty()) {
+        let Some(quality) = qualities.get(&row.key) else {
+            continue;
+        };
+        row.quality = Some(quality.label());
+        if !upgrading || quality.meets(loaded.config.upgrade.target) {
+            continue;
+        }
+        let page = format!("/download/{}", row.key);
+        match states.get(&row.key).map(String::as_str) {
+            Some(DOWNLOADING) => {
+                row.queued = Some(DownloadBadge {
+                    page,
+                    label: "Upgrading",
+                    class: "upcoming",
+                    hint: "A better copy is on its way: see how it's going",
+                });
+                continue;
+            }
+            Some(MANUAL) => {
+                row.queued = DownloadBadge::new(MANUAL, &page);
+                continue;
+            }
+            _ => {}
+        }
+        let check = checks.get(&row.key);
+        let target = loaded.config.upgrade.target.name();
+        row.upgrade = Some(UpgradeView {
+            path: format!("/release-groups/{}/upgrade", row.key),
+            requested: check.is_some_and(|c| c.requested_at.is_some()),
+            hint: match check.and_then(|c| c.result.as_deref().zip(c.checked_at)) {
+                Some((result, at)) => format!(
+                    "Below {target}. Last looked {}: {result}. Look for a better copy now",
+                    at.strftime("%Y-%m-%d")
+                ),
+                None => format!("Below {target}: look for a better copy now"),
+            },
+        });
+    }
+    Ok(())
 }
 
 /// The dashboard's status block.

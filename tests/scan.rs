@@ -167,3 +167,23 @@ fn videos_are_not_scanned() {
     let report = run(&mut state, &root);
     assert_eq!((report.files, report.unreadable), (5, 0), "{report:?}");
 }
+
+#[test]
+fn reads_each_files_quality() {
+    let dir = tempfile::tempdir().unwrap();
+    let flac = dir.path().join("a.flac");
+    let mp3 = dir.path().join("a.mp3");
+    common::audio(&flac, "flac", &[]);
+    common::audio(&mp3, "mp3", &[]);
+    let flac = newcut::scan::tags::read(&flac).unwrap().quality;
+    assert!(flac.lossless, "{flac:?}");
+    assert_eq!(flac.format, "FLAC");
+    assert!(
+        flac.bit_depth.is_some() && flac.sample_rate.is_some(),
+        "{flac:?}"
+    );
+    let mp3 = newcut::scan::tags::read(&mp3).unwrap().quality;
+    assert!(!mp3.lossless, "{mp3:?}");
+    assert_eq!(mp3.format, "MP3");
+    assert!(mp3.bitrate.is_some(), "{mp3:?}");
+}

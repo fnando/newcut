@@ -206,6 +206,7 @@ fn walk(
                     release_mbid: tags.release_mbid,
                     release_group_mbid: tags.release_group_mbid,
                     artist_mbids: tags.artist_mbids,
+                    quality: tags.quality,
                 });
             }
             Err(error) => {
