@@ -412,7 +412,10 @@ pub fn overview(conn: &Connection, rev: i64, loaded: &Loaded) -> anyhow::Result<
         owned: count(Status::Owned),
         missing: count(Status::Missing),
         upcoming: count(Status::Upcoming),
-        untagged: library::untagged(conn)?.len(),
+        untagged: library::untagged(conn)?
+            .iter()
+            .filter(|u| !u.ignored)
+            .count(),
         last_scan: store::get_time(conn, store::LAST_SCAN)?.map(local),
         last_fresh: store::get_time(conn, store::LAST_FRESH)?.map(local),
         rev,

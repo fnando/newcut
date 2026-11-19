@@ -200,6 +200,63 @@ async fn pages_show_whats_owned_missing_and_new() {
 }
 
 #[tokio::test]
+async fn untagged_folders_link_to_their_artist_and_can_be_ignored() {
+    let s = setup(None);
+    let library = s._dir.path().display().to_string();
+    library::upsert_file(
+        &Db::open(&s.web.db).unwrap().conn,
+        &ScannedFile {
+            path: "/music/u/1.flac".into(),
+            library: library.clone(),
+            dir: "/music/u".into(),
+            album: Some("Bootleg".into()),
+            album_artist: Some("Artist & Co".into()),
+            artist_mbids: vec![ARTIST.into()],
+            ..ScannedFile::default()
+        },
+        jiff::Timestamp::now(),
+    )
+    .unwrap();
+    let page = || async {
+        call(&s.web, get("/untagged").body(Body::empty()).unwrap())
+            .await
+            .2
+    };
+    let body = page().await;
+    assert!(
+        body.contains(&format!("<a href=\"/artists/{ARTIST}\">")),
+        "{body}"
+    );
+    assert!(
+        body.contains("/untagged/ignore") && !body.contains("Ignored ·"),
+        "{body}"
+    );
+
+    let ignore = |action: &str| {
+        let mut request = post(&s.web, &format!("/untagged/{action}"));
+        *request.body_mut() = Body::from(format!(
+            "library={}&dir=%2Fmusic%2Fu",
+            library.replace('/', "%2F")
+        ));
+        request.headers_mut().insert(
+            header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded".parse().unwrap(),
+        );
+        request
+    };
+    let (status, _, _) = call(&s.web, ignore("ignore")).await;
+    assert!(status.is_success(), "{status}");
+    let body = page().await;
+    assert!(
+        body.contains("Ignored · 1") && body.contains("/untagged/unignore"),
+        "{body}"
+    );
+    assert!(body.contains("Nothing left but what you ignored"), "{body}");
+    call(&s.web, ignore("unignore")).await;
+    assert!(!page().await.contains("Ignored ·"));
+}
+
+#[tokio::test]
 async fn each_artist_has_a_feed() {
     let s = setup(Some(TOKEN));
     let (status, headers, body) = call(

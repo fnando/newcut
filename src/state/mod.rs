@@ -21,6 +21,7 @@ const MIGRATION_LIST: &[M<'static>] = &[
     M::up(include_str!("download_import.sql")),
     M::up(include_str!("no_deezer.sql")),
     M::up(include_str!("upgrades.sql")),
+    M::up(include_str!("untagged_ignored.sql")),
 ];
 const MIGRATIONS: Migrations<'static> = Migrations::from_slice(MIGRATION_LIST);
 

@@ -5,21 +5,42 @@
 <header class="page-head">
   <div>
     <h1>Untagged</h1>
-    <div class="totals"><span>{{ folders.len() }} folders with files that have no MusicBrainz release id; tag them with MusicBrainz Picard so they count</span></div>
+    <div class="totals"><span>{{ self.listed().count() }} folders with files that have no MusicBrainz release id; tag them with MusicBrainz Picard so they count, or ignore them</span></div>
   </div>
 </header>
-{% if folders.is_empty() %}
-<div class="card"><p class="empty">Every file has MusicBrainz tags.</p></div>
+{% if self.listed().next().is_none() %}
+<div class="card"><p class="empty">{% if folders.is_empty() %}Every file has MusicBrainz tags.{% else %}Nothing left but what you ignored.{% endif %}</p></div>
 {% else %}
 <div class="card">
-{% for folder in folders %}
-  <div class="row">
-    <div class="row-main">
-      <div class="row-title">{{ folder.album.as_deref().unwrap_or("Untitled") }}{% if let Some(artist) = folder.artist %} <span class="muted">· {{ artist }}</span>{% endif %}</div>
-      <div class="meta"><code>{{ folder.dir }}</code><span>{{ folder.files }} files</span></div>
-    </div>
-  </div>
+{% for folder in self.listed() %}
+  {% call untagged_row(folder) %}{% endcall %}
+{% endfor %}
+</div>
+{% endif %}
+{% if self.ignored().next().is_some() %}
+<div class="section-head"><h2>Ignored · {{ self.ignored().count() }}</h2><span class="hint">Not listed above or counted as untagged</span></div>
+<div class="card">
+{% for folder in self.ignored() %}
+  {% call untagged_row(folder) %}{% endcall %}
 {% endfor %}
 </div>
 {% endif %}
 {% endblock %}
+
+{% macro untagged_row(folder) %}
+  <div class="row{% if folder.ignored %} dim{% endif %}">
+    <div class="row-main">
+      <div class="row-title">{{ folder.album.as_deref().unwrap_or("Untitled") }}{% if let Some(artist) = folder.artist %} <span class="muted">· {% if let Some(mbid) = folder.artist_mbid %}<a href="/artists/{{ mbid }}">{{ artist }}</a>{% else %}{{ artist }}{% endif %}</span>{% endif %}</div>
+      <div class="meta"><code>{{ folder.dir }}</code><span>{{ folder.files }} files</span></div>
+    </div>
+    <form class="row-side" hx-post="/untagged/{% if folder.ignored %}unignore{% else %}ignore{% endif %}">
+      <input type="hidden" name="library" value="{{ folder.library }}">
+      <input type="hidden" name="dir" value="{{ folder.dir }}">
+      {% if folder.ignored %}
+      <button class="small">Unignore</button>
+      {% else %}
+      <button class="small" title="Stop listing it here and counting it as untagged">Ignore</button>
+      {% endif %}
+    </form>
+  </div>
+{% endmacro %}

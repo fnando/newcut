@@ -270,7 +270,7 @@ what the file changes from it.
   don't have yet, search MusicBrainz from there (a mirror without a search
   server works too).
 - **Missing**: everything you don't have, across artists.
-- **Untagged**: folders with files Picard hasn't tagged.
+- **Untagged**: folders with files Picard hasn't tagged, linked to their artist when newcut knows them. Ignore the ones you'll never tag (a bootleg, a backdrop video) and they stop being listed and counted.
 - **Config**: the editor and its history.
 
 To reach it from other machines, listen on another address and set a token

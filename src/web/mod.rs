@@ -174,6 +174,7 @@ pub fn router(web: Arc<Web>) -> Router {
         )
         .route("/missing", get(missing_page))
         .route("/untagged", get(untagged_page))
+        .route("/untagged/{action}", post(untagged_action))
         .route("/config", get(config_page))
         .route("/config/check", post(config_check))
         .route("/config/save", post(config_save))
@@ -1143,6 +1144,45 @@ async fn untagged_page(State(web): State<Arc<Web>>) -> Result<Html<String>, WebE
         csrf: web.csrf.clone(),
         folders,
     })
+}
+
+impl UntaggedPage {
+    fn listed(&self) -> impl Iterator<Item = &library::Untagged> {
+        self.folders.iter().filter(|f| !f.ignored)
+    }
+
+    fn ignored(&self) -> impl Iterator<Item = &library::Untagged> {
+        self.folders.iter().filter(|f| f.ignored)
+    }
+}
+
+#[derive(Deserialize)]
+struct UntaggedForm {
+    library: String,
+    dir: String,
+}
+
+async fn untagged_action(
+    State(web): State<Arc<Web>>,
+    Path(action): Path<String>,
+    Form(form): Form<UntaggedForm>,
+) -> Result<Response, WebError> {
+    let ignored = match action.as_str() {
+        "ignore" => true,
+        "unignore" => false,
+        _ => return Ok(not_found("such action")),
+    };
+    web.db(move |conn, _, _| {
+        Ok(library::set_dir_ignored(
+            conn,
+            &form.library,
+            &form.dir,
+            ignored,
+            jiff::Timestamp::now(),
+        )?)
+    })
+    .await?;
+    Ok(refresh())
 }
 
 // ---------- config ----------

@@ -932,7 +932,12 @@ pub struct Untagged {
     pub dir: String,
     pub album: Option<String>,
     pub artist: Option<String>,
+    /// The artist's page to link to: from the files' artist ids, else the
+    /// one artist with `artist`'s name.
+    pub artist_mbid: Option<String>,
     pub files: i64,
+    /// You'd rather not see it.
+    pub ignored: bool,
 }
 
 /// Folders with files that have no release or release group id.
@@ -942,9 +947,22 @@ pub struct Untagged {
 /// On database errors.
 pub fn untagged(conn: &Connection) -> rusqlite::Result<Vec<Untagged>> {
     let mut stmt = conn.prepare(
-        "SELECT library, dir, max(album), max(album_artist), count(*) FROM files
-         WHERE release_mbid IS NULL AND release_group_mbid IS NULL
-         GROUP BY library, dir ORDER BY library, dir",
+        "SELECT library, dir, album, artist, files,
+           coalesce(
+             (SELECT min(fa.artist_mbid) FROM files f
+              JOIN file_artists fa ON fa.path = f.path
+              WHERE f.library = u.library AND f.dir = u.dir),
+             (SELECT min(a.mbid) FROM artists a
+              WHERE a.name = u.artist COLLATE NOCASE
+              HAVING count(*) = 1)),
+           EXISTS (SELECT 1 FROM ignored_dirs i
+                   WHERE i.library = u.library AND i.dir = u.dir)
+         FROM (SELECT library, dir, max(album) AS album, max(album_artist) AS artist,
+                 count(*) AS files
+               FROM files
+               WHERE release_mbid IS NULL AND release_group_mbid IS NULL
+               GROUP BY library, dir) u
+         ORDER BY library, dir",
     )?;
     stmt.query_map([], |r| {
         Ok(Untagged {
@@ -952,10 +970,40 @@ pub fn untagged(conn: &Connection) -> rusqlite::Result<Vec<Untagged>> {
             dir: r.get(1)?,
             album: r.get(2)?,
             artist: r.get(3)?,
+            artist_mbid: r.get(5)?,
             files: r.get(4)?,
+            ignored: r.get(6)?,
         })
     })?
     .collect()
+}
+
+/// Leave the untagged folder `dir` (of `library`) out of the Untagged
+/// page's list and counts, or put it back.
+///
+/// # Errors
+///
+/// On database errors.
+pub fn set_dir_ignored(
+    conn: &Connection,
+    library: &str,
+    dir: &str,
+    ignored: bool,
+    now: Timestamp,
+) -> rusqlite::Result<()> {
+    if ignored {
+        conn.execute(
+            "INSERT INTO ignored_dirs (library, dir, ignored_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT DO NOTHING",
+            params![library, dir, now.to_string()],
+        )?;
+    } else {
+        conn.execute(
+            "DELETE FROM ignored_dirs WHERE library = ?1 AND dir = ?2",
+            params![library, dir],
+        )?;
+    }
+    Ok(())
 }
 
 /// A library's totals.
@@ -978,6 +1026,8 @@ pub fn library_totals(conn: &Connection) -> rusqlite::Result<HashMap<String, Lib
            (SELECT count(DISTINCT fa.artist_mbid) FROM file_artists fa
               JOIN files f2 ON f2.path = fa.path WHERE f2.library = f.library),
            count(DISTINCT CASE WHEN release_mbid IS NULL AND release_group_mbid IS NULL
+                                AND NOT EXISTS (SELECT 1 FROM ignored_dirs i
+                                  WHERE i.library = f.library AND i.dir = f.dir)
                           THEN dir END)
          FROM files f GROUP BY library",
     )?;
@@ -1117,12 +1167,18 @@ mod tests {
             .map(|a| a.release_group_mbid)
             .collect();
         assert_eq!(groups, [Some("g1".into()), Some("g2".into())]);
-        assert_eq!(untagged(conn).unwrap().len(), 1);
+        let found = untagged(conn).unwrap();
+        assert_eq!(found.len(), 1);
         let totals = &library_totals(conn).unwrap()["/music"];
         assert_eq!(
             (totals.files, totals.albums, totals.artists, totals.untagged),
             (4, 2, 1, 1)
         );
+        set_dir_ignored(conn, "/music", &found[0].dir, true, now).unwrap();
+        assert!(untagged(conn).unwrap()[0].ignored);
+        assert_eq!(library_totals(conn).unwrap()["/music"].untagged, 0);
+        set_dir_ignored(conn, "/music", &found[0].dir, false, now).unwrap();
+        assert!(!untagged(conn).unwrap()[0].ignored);
 
         remove_files(conn, &["/music/c/1.flac".into()]).unwrap();
         assert!(untagged(conn).unwrap().is_empty());
