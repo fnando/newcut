@@ -270,8 +270,7 @@ pub async fn file_download(
     let replaced: Vec<PathBuf> = download
         .upgrade
         .as_ref()
-        .map(|u| u.replaces.iter().map(PathBuf::from).collect())
-        .unwrap_or_default();
+        .map_or_else(Vec::new, |u| u.replaces.iter().map(PathBuf::from).collect());
     let replacing = download.upgrade.as_ref().map(|_| Replacing {
         dirs: &replaced,
         trash: paths.replaced.join(format!(
