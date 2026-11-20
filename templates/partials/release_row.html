@@ -7,6 +7,7 @@
       <span class="pill st-{{ row.status }}">{{ row.label }}</span>
       {% if row.is_new %}<span class="badge-new">New</span>{% endif %}
       {% if let Some(badge) = row.queued %}<a class="st-{{ badge.class }}" href="{{ badge.page }}" title="{{ badge.hint }}">{{ badge.label }}</a>{% endif %}
+      {% if let Some(upgraded) = row.upgraded %}<span class="pill st-upgraded" title="Upgraded from {{ upgraded.from }} to {{ upgraded.to }} on {{ upgraded.date }}">Upgraded</span>{% endif %}
       {% if let Some(quality) = row.quality %}<span title="Its worst file's quality">{{ quality }}</span>{% endif %}
       <span>{{ row.kind }}</span>
       <span>{{ row.date.as_deref().unwrap_or("Date unknown") }}</span>

@@ -174,6 +174,7 @@ pub fn router(web: Arc<Web>) -> Router {
         )
         .route("/missing", get(missing_page))
         .route("/untagged", get(untagged_page))
+        .route("/upgrades", get(upgrades_page))
         .route("/untagged/{action}", post(untagged_action))
         .route("/config", get(config_page))
         .route("/config/check", post(config_check))
@@ -713,6 +714,7 @@ fn release_chips(rows: &[Row], status: &str) -> Vec<Chip> {
         ("new", "New"),
         ("owned", "Owned"),
         ("ignored", "Ignored"),
+        ("upgraded", "Upgraded"),
         ("other", "Not counted"),
     ]
     .into_iter()
@@ -730,6 +732,7 @@ fn row_is(row: &Row, status: &str) -> bool {
     match status {
         "" => row.status != "other" && row.status != "ignored",
         "new" => row.is_new,
+        "upgraded" => row.upgraded.is_some(),
         key => row.status == key,
     }
 }
@@ -1004,6 +1007,7 @@ impl ReleaseList {
         query: ListQuery,
         wanted: fn(&Row) -> bool,
         chips: &[&str],
+        order: fn(&mut [Row]),
     ) -> Result<Self, WebError> {
         let (_, rows) = web
             .db(|conn, _, loaded| data::rows(conn, loaded, None))
@@ -1018,11 +1022,12 @@ impl ReleaseList {
         } else {
             String::new()
         };
-        let rows: Vec<Row> = rows
+        let mut rows: Vec<Row> = rows
             .into_iter()
             .filter(|r| status.is_empty() || row_is(r, &status))
             .filter(|r| matches_query(&query.q, &[&r.title, &r.artist]))
             .collect();
+        order(&mut rows);
         let total = rows.len();
         let (rows, pages) = paginate(rows, query.page());
         Ok(Self {
@@ -1098,6 +1103,7 @@ async fn releases_page(
         query,
         |r| row_is(r, ""),
         &["new", "upcoming", "owned", "missing"],
+        |_| {},
     )
     .await?;
     render(&ReleasesPage {
@@ -1123,9 +1129,37 @@ async fn missing_page(
         query,
         |r| matches!(r.status.as_str(), "missing" | "upcoming"),
         &["missing", "upcoming", "new"],
+        |_| {},
     )
     .await?;
     render(&MissingPage {
+        csrf: web.csrf.clone(),
+        list,
+    })
+}
+
+#[derive(Template)]
+#[template(path = "upgrades.html")]
+struct UpgradesPage {
+    csrf: String,
+    list: ReleaseList,
+}
+
+/// The albums newcut upgraded, latest first.
+async fn upgrades_page(
+    State(web): State<Arc<Web>>,
+    Query(query): Query<ListQuery>,
+) -> Result<Html<String>, WebError> {
+    let list = ReleaseList::load(
+        &web,
+        "/upgrades",
+        query,
+        |r| r.upgraded.is_some(),
+        &[],
+        |rows| rows.sort_by_key(|r| std::cmp::Reverse(r.upgraded.as_ref().map(|u| u.at))),
+    )
+    .await?;
+    render(&UpgradesPage {
         csrf: web.csrf.clone(),
         list,
     })

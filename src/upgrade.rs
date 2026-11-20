@@ -342,6 +342,7 @@ pub fn filed(
         now + loaded.config.upgrade.retry.0,
         now,
     )?;
+    upgrades::upgraded(conn, key, &upgrade.from, &quality, now)?;
     Ok(quality)
 }
 
@@ -567,6 +568,11 @@ mod tests {
             .remove(GROUP)
             .unwrap();
         assert_eq!(check.result.as_deref(), Some("upgraded from MP3 192 kbps"));
+        let upgraded = check.upgraded.unwrap();
+        assert_eq!(
+            (upgraded.from.as_str(), upgraded.to.as_str()),
+            ("MP3 192 kbps", "FLAC 16-bit/44.1 kHz")
+        );
     }
 
     #[tokio::test]

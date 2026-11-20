@@ -211,7 +211,10 @@ you.
 
 Album rows show each album's quality. On the artist's page, an album below
 `target` has an "Upgrade" button, which has the `upgrader` look for it right
-away. Ignored albums aren't upgraded.
+away. Ignored albums aren't upgraded. Albums newcut upgraded are marked
+"Upgraded" (hover for what from, what to, and when), and the artist's page
+can list just those. The **Upgrades** page, from the dashboard's "upgraded"
+count, lists them across artists, latest first.
 
 To have [Jellyfin](https://jellyfin.org) scan the albums newcut files right
 away, give it Jellyfin's address and an API key (Dashboard → API Keys). When
@@ -271,6 +274,7 @@ what the file changes from it.
   server works too).
 - **Missing**: everything you don't have, across artists.
 - **Untagged**: folders with files Picard hasn't tagged, linked to their artist when newcut knows them. Ignore the ones you'll never tag (a bootleg, a backdrop video) and they stop being listed and counted.
+- **Upgrades**: the albums newcut replaced with a better copy.
 - **Config**: the editor and its history.
 
 To reach it from other machines, listen on another address and set a token

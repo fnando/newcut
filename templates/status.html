@@ -23,6 +23,7 @@
           <a class="stat s-missing{% if status.missing == 0 %} zero{% endif %}" href="/missing?status=missing"><b>{{ status.missing }}</b><span>missing</span></a>
           <a class="stat s-upcoming{% if status.upcoming == 0 %} zero{% endif %}" href="/missing?status=upcoming"><b>{{ status.upcoming }}</b><span>upcoming</span></a>
           <a class="stat{% if status.untagged == 0 %} zero{% endif %}" href="/untagged"><b>{{ status.untagged }}</b><span>untagged</span></a>
+          {% if let Some(upgraded) = status.upgraded %}<a class="stat s-upgraded{% if *upgraded == 0 %} zero{% endif %}" href="/upgrades"><b>{{ upgraded }}</b><span>upgraded</span></a>{% endif %}
         </div>
       </div>
     </div>

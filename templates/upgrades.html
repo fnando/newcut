@@ -1,0 +1,13 @@
+{% extends "layout.html" %}
+{% block title %}Upgrades · newcut{% endblock %}
+{% block content %}
+<a class="back" href="/">← Dashboard</a>
+<header class="page-head">
+  <div>
+    <h1>Upgrades</h1>
+    <div class="totals"><span>Albums newcut replaced with a better copy, latest first; the old files are in <code>upgrade.replaced_dir</code></span></div>
+  </div>
+</header>
+{% let empty = "Nothing upgraded yet" %}
+{% include "partials/release_list.html" %}
+{% endblock %}

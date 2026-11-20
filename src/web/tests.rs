@@ -257,6 +257,55 @@ async fn untagged_folders_link_to_their_artist_and_can_be_ignored() {
 }
 
 #[tokio::test]
+async fn upgraded_albums_are_shown_as_such() {
+    let s = setup(None);
+    let web = s.web.clone();
+    let page = |uri: &str| {
+        let uri = uri.to_string();
+        let web = web.clone();
+        async move { call(&web, get(&uri).body(Body::empty()).unwrap()).await.2 }
+    };
+    let body = page(&format!("/artists/{ARTIST}")).await;
+    assert!(
+        !body.contains("st-upgraded") && !body.contains("status=upgraded"),
+        "{body}"
+    );
+    assert!(
+        !page("/").await.contains("/upgrades"),
+        "upgrades are off and none were made"
+    );
+    assert!(page("/upgrades").await.contains("Nothing upgraded yet"));
+
+    let at: jiff::Timestamp = "2026-11-19T12:00:00Z".parse().unwrap();
+    crate::state::upgrades::upgraded(
+        &Db::open(&s.web.db).unwrap().conn,
+        GROUP_OWNED,
+        "MP3 192 kbps",
+        "FLAC 16-bit/44.1 kHz",
+        at,
+    )
+    .unwrap();
+    let body = page(&format!("/artists/{ARTIST}")).await;
+    assert!(
+        body.contains("title=\"Upgraded from MP3 192 kbps to FLAC 16-bit/44.1 kHz on 2026-11-1"),
+        "{body}"
+    );
+    assert!(body.contains("status=upgraded"), "{body}");
+    let body = page(&format!("/artists/{ARTIST}?status=upgraded")).await;
+    assert!(
+        body.contains("Owned One") && !body.contains("Missing &#60;Two&#62;"),
+        "{body}"
+    );
+    let body = page("/upgrades").await;
+    assert!(
+        body.contains("Owned One") && !body.contains("Fresh Three"),
+        "{body}"
+    );
+    let body = page("/").await;
+    assert!(body.contains("href=\"/upgrades\"><b>1</b>"), "{body}");
+}
+
+#[tokio::test]
 async fn each_artist_has_a_feed() {
     let s = setup(Some(TOKEN));
     let (status, headers, body) = call(

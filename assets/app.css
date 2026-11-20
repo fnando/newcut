@@ -806,16 +806,19 @@ ul.plain li + li { border-top: 1px solid var(--border); }
 .download-search input { flex: 1; min-width: 0; }
 .searching::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; border: 2px solid var(--faint); border-top-color: transparent; vertical-align: -1px; animation: spin .8s linear infinite; }
 .st-owned { color: var(--ok); }
+.st-upgraded { color: var(--accent); }
 .st-missing { color: var(--warn); }
 .st-upcoming { color: var(--info); }
 .st-other { color: var(--faint); }
 .st-new { color: var(--accent); }
 .dot.g-owned    { background: var(--ok); }
+.dot.g-upgraded { background: var(--accent); }
 .dot.g-missing  { background: var(--warn); }
 .dot.g-upcoming { background: var(--info); }
 .dot.g-new      { background: var(--accent); }
 .dot.g-other    { background: var(--faint); }
 .stat.s-owned b { color: var(--ok); }
+.stat.s-upgraded b { color: var(--accent); }
 .stat.s-missing b { color: var(--warn); }
 .stat.s-upcoming b { color: var(--info); }
 .stat.s-new b { color: var(--accent); }

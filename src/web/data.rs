@@ -24,6 +24,8 @@ pub struct Overview {
     pub missing: usize,
     pub upcoming: usize,
     pub untagged: usize,
+    /// Albums newcut upgraded; `None`: upgrades are off, and none were.
+    pub upgraded: Option<i64>,
     pub last_scan: Option<String>,
     pub last_fresh: Option<String>,
     pub rev: i64,
@@ -109,6 +111,19 @@ pub struct Row {
     /// Yours, and below `upgrade.target`.
     #[serde(skip)]
     pub upgrade: Option<UpgradeView>,
+    /// Yours, and upgraded by newcut (the last time).
+    #[serde(skip)]
+    pub upgraded: Option<UpgradedView>,
+}
+
+/// An album's last upgrade, as the pages show it.
+#[derive(Debug, Clone)]
+pub struct UpgradedView {
+    pub from: String,
+    pub to: String,
+    pub at: jiff::Timestamp,
+    /// `at`'s day, in local time.
+    pub date: String,
 }
 
 /// What an album row says of its upgrades.
@@ -167,6 +182,7 @@ impl Row {
             queued: None,
             quality: None,
             upgrade: None,
+            upgraded: None,
         }
     }
 }
@@ -287,13 +303,22 @@ fn add_qualities(conn: &Connection, loaded: &Loaded, rows: &mut [Row]) -> anyhow
         .map(|a| (a.release_group_mbid, a.quality))
         .collect();
     let upgrading = loaded.config.upgrade.enabled && enabled(Service::Upgrader, &loaded.config);
-    let checks = if upgrading {
-        crate::state::upgrades::all(conn)?
-    } else {
-        HashMap::new()
-    };
+    let checks = crate::state::upgrades::all(conn)?;
     let states = crate::state::downloads::release_states(conn)?;
     for row in rows.iter_mut().filter(|r| !r.owned_in.is_empty()) {
+        row.upgraded = checks
+            .get(&row.key)
+            .and_then(|c| c.upgraded.as_ref())
+            .map(|u| UpgradedView {
+                from: u.from.clone(),
+                to: u.to.clone(),
+                at: u.at,
+                date: u
+                    .at
+                    .to_zoned(jiff::tz::TimeZone::system())
+                    .strftime("%Y-%m-%d")
+                    .to_string(),
+            });
         let Some(quality) = qualities.get(&row.key) else {
             continue;
         };
@@ -416,6 +441,8 @@ pub fn overview(conn: &Connection, rev: i64, loaded: &Loaded) -> anyhow::Result<
             .iter()
             .filter(|u| !u.ignored)
             .count(),
+        upgraded: Some(crate::state::upgrades::upgraded_count(conn)?)
+            .filter(|n| *n > 0 || loaded.config.upgrade.enabled),
         last_scan: store::get_time(conn, store::LAST_SCAN)?.map(local),
         last_fresh: store::get_time(conn, store::LAST_FRESH)?.map(local),
         rev,

@@ -18,6 +18,16 @@ pub struct Check {
     pub result: Option<String>,
     /// You asked: first in line.
     pub requested_at: Option<Timestamp>,
+    /// Its last upgrade.
+    pub upgraded: Option<Upgraded>,
+}
+
+/// An album's upgrade: from one quality to another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Upgraded {
+    pub from: String,
+    pub to: String,
+    pub at: Timestamp,
 }
 
 fn time(text: Option<String>) -> Option<Timestamp> {
@@ -31,7 +41,9 @@ fn time(text: Option<String>) -> Option<Timestamp> {
 /// On database errors.
 pub fn all(conn: &Connection) -> rusqlite::Result<HashMap<String, Check>> {
     let mut stmt = conn.prepare(
-        "SELECT rg_mbid, quality, checked_at, next_at, result, requested_at FROM upgrades",
+        "SELECT rg_mbid, quality, checked_at, next_at, result, requested_at,
+           upgraded_from, upgraded_to, upgraded_at
+         FROM upgrades",
     )?;
     stmt.query_map([], |r| {
         Ok(Check {
@@ -41,6 +53,10 @@ pub fn all(conn: &Connection) -> rusqlite::Result<HashMap<String, Check>> {
             next_at: time(r.get(3)?),
             result: r.get(4)?,
             requested_at: time(r.get(5)?),
+            upgraded: match (r.get(6)?, r.get(7)?, time(r.get(8)?)) {
+                (Some(from), Some(to), Some(at)) => Some(Upgraded { from, to, at }),
+                _ => None,
+            },
         })
     })?
     .map(|c| c.map(|c| (c.rg_mbid.clone(), c)))
@@ -123,6 +139,41 @@ pub fn checked(
     Ok(())
 }
 
+/// `rg` was upgraded `from` one quality `to` another.
+///
+/// # Errors
+///
+/// On database errors.
+pub fn upgraded(
+    conn: &Connection,
+    rg: &str,
+    from: &str,
+    to: &str,
+    now: Timestamp,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO upgrades (rg_mbid, upgraded_from, upgraded_to, upgraded_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (rg_mbid) DO UPDATE SET upgraded_from = ?2, upgraded_to = ?3,
+           upgraded_at = ?4",
+        params![rg, from, to, now.to_string()],
+    )?;
+    Ok(())
+}
+
+/// How many albums were upgraded.
+///
+/// # Errors
+///
+/// On database errors.
+pub fn upgraded_count(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT count(*) FROM upgrades WHERE upgraded_at IS NOT NULL",
+        [],
+        |r| r.get(0),
+    )
+}
+
 /// Look for `rg` again at the next run (its upgrade failed: another
 /// source may do).
 ///
@@ -162,5 +213,49 @@ mod tests {
         let check = all(conn).unwrap().remove("rg").unwrap();
         assert_eq!((check.next_at, check.requested_at), (None, None));
         assert_eq!(check.result.as_deref(), Some("failed"));
+        assert_eq!(check.upgraded, None);
+        assert_eq!(upgraded_count(conn).unwrap(), 0);
+        upgraded(conn, "rg", "MP3 192 kbps", "FLAC 16-bit/44.1 kHz", later).unwrap();
+        let check = all(conn).unwrap().remove("rg").unwrap();
+        assert_eq!(
+            check.upgraded,
+            Some(Upgraded {
+                from: "MP3 192 kbps".into(),
+                to: "FLAC 16-bit/44.1 kHz".into(),
+                at: later,
+            })
+        );
+        assert_eq!(upgraded_count(conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn earlier_upgrades_are_remembered_as_upgrades() {
+        let state = State::open_in_memory().unwrap();
+        let conn = &state.conn;
+        let now: Timestamp = "2026-11-19T00:00:00Z".parse().unwrap();
+        // As the migration finds them: only the check's result says so.
+        checked(conn, "rg", "FLAC", "upgraded from MP3 192 kbps", now, now).unwrap();
+        conn.execute(
+            "UPDATE upgrades SET upgraded_from = NULL, upgraded_to = NULL, upgraded_at = NULL",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            include_str!("upgraded.sql")
+                .split_once("UPDATE")
+                .map(|(_, u)| format!("UPDATE{u}"))
+                .unwrap()
+                .as_str(),
+        )
+        .unwrap();
+        let check = all(conn).unwrap().remove("rg").unwrap();
+        assert_eq!(
+            check.upgraded,
+            Some(Upgraded {
+                from: "MP3 192 kbps".into(),
+                to: "FLAC".into(),
+                at: now,
+            })
+        );
     }
 }

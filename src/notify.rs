@@ -345,6 +345,7 @@ mod tests {
             queued: None,
             quality: None,
             upgrade: None,
+            upgraded: None,
         }
     }
 
