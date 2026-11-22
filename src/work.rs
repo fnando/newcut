@@ -392,28 +392,32 @@ impl Work<'_> {
                 }
             }
         }
-        let told_upgrades = self.after_filing(filed_dirs).await?;
-        let told = match (self.tell_about_downloads(needs_you).await, told_upgrades) {
-            (Some(a), Some(b)) => Some(format!("{a}; upgrades: {b}")),
-            (a, b) => a.or(b),
-        };
+        let (told_upgrades, told_requests) = self.after_filing(filed_dirs).await?;
+        let told = joined_told(&[
+            ("downloads", self.tell_about_downloads(needs_you).await),
+            ("upgrades", told_upgrades),
+            ("requests", told_requests),
+        ]);
         let summary = import_summary(filed, manual, downloading, unknown, told);
         Ok((summary, filed))
     }
 
     /// The album folders just filed (with their downloads): told to
-    /// Jellyfin, and scanned; then what upgrades replaced is forgotten.
-    /// Returns what telling you of upgrades did.
+    /// Jellyfin, and scanned; then what upgrades replaced is forgotten, and
+    /// the requests filed are done. Returns what telling you of upgrades,
+    /// and of requests, did.
     async fn after_filing(
         &mut self,
         filed_dirs: Vec<(crate::state::downloads::Download, String)>,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> anyhow::Result<(Option<String>, Option<String>)> {
         use crate::state::downloads::FILED;
         // Jellyfin first: scanning ours takes a while.
         let dirs: Vec<std::path::PathBuf> = filed_dirs.iter().map(|(_, d)| d.into()).collect();
         crate::jellyfin::tell(self.loaded, &dirs).await;
         // Scanned now (not at the next full scan): it's yours right away.
         let mut upgraded = Vec::new();
+        let mut requested = Vec::new();
+        let requests = crate::state::requests::all(&self.state.conn)?;
         for (download, dir) in filed_dirs {
             crate::scan::scan_new_album(
                 &mut self.state.conn,
@@ -427,9 +431,14 @@ impl Work<'_> {
             });
             if download.upgrade.is_some() {
                 upgraded.push((download, dir));
+            } else if requests.contains_key(&download.release_key) {
+                requested.push((download, dir));
             }
         }
-        self.after_upgrades(upgraded).await
+        Ok((
+            self.after_upgrades(upgraded).await?,
+            self.after_requests(requested).await?,
+        ))
     }
 
     /// Download `failed` failed: queue another source for its album (the
@@ -564,6 +573,25 @@ impl Work<'_> {
 }
 
 /// What the importer did, in a line.
+/// What telling you of each kind of thing did, as one: labelled when
+/// there's more than one.
+fn joined_told(told: &[(&str, Option<String>)]) -> Option<String> {
+    let told: Vec<(&str, &String)> = told
+        .iter()
+        .filter_map(|(what, t)| t.as_ref().map(|t| (*what, t)))
+        .collect();
+    match told.as_slice() {
+        [] => None,
+        [(_, one)] => Some((*one).clone()),
+        all => Some(
+            all.iter()
+                .map(|(what, t)| format!("{what}: {t}"))
+                .collect::<Vec<_>>()
+                .join("; "),
+        ),
+    }
+}
+
 fn import_summary(
     filed: usize,
     manual: usize,

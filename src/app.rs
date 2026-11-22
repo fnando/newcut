@@ -151,6 +151,8 @@ pub async fn run(cli: &Cli, out: &mut dyn Write) -> anyhow::Result<i32> {
         Command::Artists => artists(&app, out),
         Command::Ignore(args) => ignore(&app, &args.release_groups, true, out),
         Command::Unignore(args) => ignore(&app, &args.release_groups, false, out),
+        Command::Request(args) => request(&app, &args.release_groups, true, out),
+        Command::Unrequest(args) => request(&app, &args.release_groups, false, out),
         Command::Config { cmd } => config_cmd(&app, cmd, out),
         Command::Daemon { cmd } => daemon_cmd(&app, cmd, out).await,
     }
@@ -509,6 +511,40 @@ fn ignore(app: &App, groups: &[String], ignored: bool, out: &mut dyn Write) -> a
         out,
         "{} {} release group{}",
         if ignored { "Ignored" } else { "Counting in" },
+        groups.len(),
+        if groups.len() == 1 { "" } else { "s" }
+    )?;
+    Ok(exit::OK)
+}
+
+fn request(app: &App, groups: &[String], wanted: bool, out: &mut dyn Write) -> anyhow::Result<i32> {
+    let state = app.open_state()?;
+    for group in groups {
+        if !crate::scan::tags::is_mbid(group) {
+            return Err(usage(format!("{group:?} isn't a MusicBrainz id")));
+        }
+        let group = group.to_ascii_lowercase();
+        if wanted {
+            if library::release_group_title(&state.conn, &group)?.is_none() {
+                writeln!(
+                    out,
+                    "{group}: not one of your artists' release groups; it's looked for once \
+                     newcut knows it (follow its artist)"
+                )?;
+            }
+            crate::request::request(&state.conn, &group)?;
+        } else {
+            crate::request::unrequest(&state.conn, &group)?;
+        }
+    }
+    writeln!(
+        out,
+        "{} {} release group{}",
+        if wanted {
+            "Requested"
+        } else {
+            "Took back the request for"
+        },
         groups.len(),
         if groups.len() == 1 { "" } else { "s" }
     )?;

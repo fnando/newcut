@@ -34,12 +34,14 @@ pub enum Service {
     Importer,
     /// Looks for better copies of albums below `upgrade.target`.
     Upgrader,
+    /// Looks for the albums you requested on Soulseek.
+    Requester,
     /// The web UI (when `server.enabled`).
     Server,
 }
 
 impl Service {
-    pub const ALL: [Service; 8] = [
+    pub const ALL: [Service; 9] = [
         Service::Scanner,
         Service::Resolver,
         Service::Discography,
@@ -47,6 +49,7 @@ impl Service {
         Service::Notifier,
         Service::Importer,
         Service::Upgrader,
+        Service::Requester,
         Service::Server,
     ];
 
@@ -60,6 +63,7 @@ impl Service {
             Service::Notifier => "notifier",
             Service::Importer => "importer",
             Service::Upgrader => "upgrader",
+            Service::Requester => "requester",
             Service::Server => "server",
         }
     }
@@ -74,6 +78,7 @@ impl Service {
             Service::Notifier => "Sends notifications of new releases",
             Service::Importer => "Tags and files finished slskd downloads",
             Service::Upgrader => "Looks for better copies of your albums",
+            Service::Requester => "Looks for the albums you requested",
             Service::Server => "Serves this web UI",
         }
     }
@@ -94,6 +99,7 @@ pub struct Wakes {
     notifier: Notify,
     importer: Notify,
     upgrader: Notify,
+    requester: Notify,
     server: Notify,
 }
 
@@ -108,6 +114,7 @@ impl Wakes {
             Service::Notifier => &self.notifier,
             Service::Importer => &self.importer,
             Service::Upgrader => &self.upgrader,
+            Service::Requester => &self.requester,
             Service::Server => &self.server,
         }
     }
@@ -240,6 +247,7 @@ pub fn enabled(service: Service, config: &crate::config::Config) -> bool {
                 && config.slskd.output_dir.is_some()
         }
         Service::Upgrader => config.upgrade.enabled && enabled(Service::Importer, config),
+        Service::Requester => enabled(Service::Importer, config),
         Service::Scanner | Service::Resolver | Service::Discography => true,
     }
 }
@@ -367,6 +375,14 @@ async fn run(
             }
             result
         }
+        Service::Requester => {
+            let result = work.requests().await;
+            if result.is_ok() {
+                // Queued: the importer follows them.
+                wake.wake(Service::Importer);
+            }
+            result
+        }
         Service::Server => unreachable!("the server is no worker"),
     })
 }
@@ -438,6 +454,10 @@ fn due_now(
                 if scanned { wait } else { schedule::CHECK_EVERY },
             )
         }
+        Service::Requester => (
+            loaded.import.is_some() && !crate::request::due(&state.conn, now)?.0.is_empty(),
+            schedule::CHECK_EVERY,
+        ),
         Service::Server => unreachable!("the server is no worker"),
     })
 }

@@ -131,6 +131,9 @@ new_window = "60d"
 notification = "1d"
 # Look for upgrades of albums below `upgrade.target`.
 upgrade = "1d"
+# Look on Soulseek again for the albums you requested and it didn't have
+# yet (a new request is looked for right away).
+request = "6h"
 
 [notification]
 # What to tell you about: "missing" (new releases you don't have) or "all"

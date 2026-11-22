@@ -75,6 +75,7 @@
         "fresh": "1d",
         "new_window": "8w4d",
         "notification": "1d",
+        "request": "6h",
         "scan": "6h",
         "upgrade": "1d"
       }
@@ -387,6 +388,11 @@
           "description": "Send notifications of new releases.",
           "$ref": "#/$defs/Duration",
           "default": "1d"
+        },
+        "request": {
+          "description": "Look on Soulseek again for the albums you requested and it didn't have.",
+          "$ref": "#/$defs/Duration",
+          "default": "6h"
         },
         "scan": {
           "description": "Scan the libraries.",

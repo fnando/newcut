@@ -23,6 +23,7 @@ pub mod notify;
 pub mod paths;
 pub mod process;
 pub mod quality;
+pub mod request;
 pub mod scan;
 pub mod shutdown;
 pub mod slskd;

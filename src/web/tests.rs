@@ -1628,3 +1628,97 @@ async fn artists_folders_can_be_refreshed_in_jellyfin() {
     assert!(body.contains("Jellyfin is refreshing them"), "{body}");
     assert!(body.contains("title=\"/data/music/a\""), "{body}");
 }
+
+#[tokio::test]
+async fn albums_you_dont_have_can_be_requested() {
+    const GROUP_UPCOMING: &str = "aaaaaaaa-0000-4000-8000-000000000099";
+    let s = setup(None);
+    let artist_page = || async {
+        call(
+            &s.web,
+            get(&format!("/artists/{ARTIST}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .2
+    };
+    let request_path = format!("/release-groups/{GROUP_UPCOMING}/request");
+    {
+        let state = Db::open(&s.web.db).unwrap();
+        library::upsert_release_group(
+            &state.conn,
+            &NewReleaseGroup {
+                mbid: GROUP_UPCOMING.into(),
+                title: "Coming Four".into(),
+                artist_credit: Some("Artist & Co".into()),
+                primary_type: Some("Album".into()),
+                first_release_date: Some("2099-01-01".into()),
+                artist_mbids: vec![ARTIST.into()],
+                ..NewReleaseGroup::default()
+            },
+            "musicbrainz",
+            jiff::Timestamp::now(),
+        )
+        .unwrap();
+    }
+    // Without the importer, there's no requester to ask.
+    assert!(!artist_page().await.contains(&request_path));
+
+    {
+        let state = Db::open(&s.web.db).unwrap();
+        let root = s._dir.path().display().to_string();
+        let config = format!(
+            "version = 1\nlibraries = [{root:?}]\n\
+             [slskd]\nenabled = true\napi_key = \"k\"\n\
+             downloads_dir = \"{root}/downloads\"\noutput_dir = \"{root}/%{{album}}\"\n",
+        );
+        revisions::add(&state.conn, &config, "file", jiff::Timestamp::now()).unwrap();
+    }
+    let body = artist_page().await;
+    assert!(body.contains(&request_path), "upcoming: {body}");
+    assert!(
+        body.contains(&format!("href=\"/download/{GROUP_UPCOMING}\"")),
+        "an upcoming album can be searched for: {body}"
+    );
+    assert!(
+        body.contains(&format!("/release-groups/{GROUP_MISSING}/request")),
+        "missing: {body}"
+    );
+    assert!(
+        !body.contains(&format!("/release-groups/{GROUP_OWNED}/request")),
+        "not what you have"
+    );
+
+    let (status, _, _) = call(&s.web, post(&s.web, &request_path)).await;
+    assert!(status.is_success() || status.is_redirection(), "{status}");
+    let body = artist_page().await;
+    assert!(
+        body.contains(&format!("/release-groups/{GROUP_UPCOMING}/unrequest")),
+        "{body}"
+    );
+    assert!(body.contains("status=requested"), "a chip: {body}");
+    let body = call(
+        &s.web,
+        get("/missing?status=requested")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+    .2;
+    assert!(
+        body.contains("Coming Four") && !body.contains("Missing &lt;Two&gt;"),
+        "{body}"
+    );
+
+    let (status, _, _) = call(
+        &s.web,
+        post(
+            &s.web,
+            &format!("/release-groups/{GROUP_UPCOMING}/unrequest"),
+        ),
+    )
+    .await;
+    assert!(status.is_success() || status.is_redirection(), "{status}");
+    assert!(artist_page().await.contains(&request_path));
+}

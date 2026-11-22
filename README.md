@@ -177,6 +177,31 @@ A download that's still going (or failed) can be cancelled from the
 Downloads page or the album's: its files are cancelled in slskd, and the
 folder newcut had slskd put them in is deleted.
 
+### Requests
+
+Want an album that isn't on Soulseek yet, or isn't even out? Request it:
+"Request", on any album you don't have (missing or upcoming), or `newcut
+request <release-group-mbid>`. With slskd filing downloads (`downloads_dir`
+and `output_dir`), the `requester` searches Soulseek for it right away, and
+again every `schedule.request` (`6h`) until it's there. Then it queues the
+folder that matches one of the album's releases exactly and is closest to
+`upgrade.target` while meeting it (or else the best there is), and the
+importer files it. A download that fails is replaced like any other.
+
+The request is done once you have the album. When the importer files one
+you requested, you're told (through the `[notification]` channels):
+"Downloaded: Radiohead", "OK Computer (FLAC 16-bit/44.1 kHz) is in your
+library." (several at once: "3 requested albums downloaded"). Until then, "Requested ✕" (or
+`newcut unrequest`) takes it back; hover over it for what the last look
+found. Requested albums have their own chip on Missing and on artists'
+pages. Upcoming albums also lead to their download page, so you can search
+for them yourself.
+
+```toml
+[schedule]
+request = "6h"
+```
+
 ### Upgrades
 
 With slskd filing downloads (`downloads_dir` and `output_dir`), newcut can
@@ -272,7 +297,8 @@ what the file changes from it.
   you have and where. To follow an artist you
   don't have yet, search MusicBrainz from there (a mirror without a search
   server works too).
-- **Missing**: everything you don't have, across artists.
+- **Missing**: everything you don't have, across artists; request what
+  you want newcut to keep looking for.
 - **Untagged**: folders with files Picard hasn't tagged, linked to their artist when newcut knows them. Ignore the ones you'll never tag (a bootleg, a backdrop video) and they stop being listed and counted.
 - **Upgrades**: the albums newcut replaced with a better copy.
 - **Config**: the editor and its history.
@@ -348,6 +374,10 @@ once: "3 albums upgraded"). The command gets those with `"kind": "upgrade"`
 and an `upgrades` array (`album`, `artist`, `release_group_mbid`, `from`,
 `to`, `folder`).
 
+Albums you requested are told when they're filed. The command gets those with
+`"kind": "request"` and a `requests` array (`album`, `artist`,
+`release_group_mbid`, `quality`, `folder`).
+
 Each channel keeps when it last heard from newcut. Its first run only starts
 that clock, so turning notifications on doesn't send what's already new; one
 that fails (Pushover down, your script exiting with an error) hears the same
@@ -398,12 +428,13 @@ Pushover's keys are masked in the web UI's config editor, like
 
 ## Keeping it running
 
-`newcut run` starts eight services, each on its own: `scanner` (every
+`newcut run` starts nine services, each on its own: `scanner` (every
 `schedule.scan`), `resolver` (after each scan), `discography`, `fresh`,
 `notifier` (every `schedule.notification`, when a channel is set up),
 `importer` (finished slskd downloads, when `slskd.downloads_dir` and
 `output_dir` are set), `upgrader` (every `schedule.upgrade`, when
-`upgrade.enabled`) and `server`. One that stops unexpectedly is started again (after
+`upgrade.enabled`), `requester` (the albums you requested, when the importer
+is on) and `server`. One that stops unexpectedly is started again (after
 1 second, then 2, 4, … up to 5 minutes).
 
 ```sh
@@ -426,6 +457,8 @@ newcut artists
 newcut sync --artist "Radiohead"        # check one artist now
 newcut ignore <release-group-mbid>…
 newcut unignore <release-group-mbid>…
+newcut request <release-group-mbid>…   # look for it on Soulseek until it's there
+newcut unrequest <release-group-mbid>…
 ```
 
 ## Seeing more (or less)

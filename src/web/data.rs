@@ -95,7 +95,7 @@ pub struct Row {
     pub link: String,
     pub link_label: String,
     pub source: String,
-    /// Out, and you don't have it: something to download.
+    /// You don't have it (out or still to come): something to download.
     #[serde(skip)]
     pub downloadable: bool,
     /// Where the title leads, when not to `link`: the download page
@@ -114,6 +114,21 @@ pub struct Row {
     /// Yours, and upgraded by newcut (the last time).
     #[serde(skip)]
     pub upgraded: Option<UpgradedView>,
+    /// You don't have it, and the requester can look for it.
+    #[serde(skip)]
+    pub request: Option<RequestView>,
+}
+
+/// What an album row says of its request.
+#[derive(Debug, Clone)]
+pub struct RequestView {
+    /// Where asking for it (and taking that back, `{path}/unrequest`)
+    /// posts.
+    pub path: String,
+    /// You asked for it.
+    pub requested: bool,
+    /// What asking does, or what the last look found.
+    pub hint: String,
 }
 
 /// An album's last upgrade, as the pages show it.
@@ -177,12 +192,13 @@ impl Row {
             link: format!("https://musicbrainz.org/release-group/{}", g.mbid),
             link_label: "MusicBrainz".into(),
             source: g.source.clone(),
-            downloadable: matches!(entry.status, Status::Missing),
+            downloadable: matches!(entry.status, Status::Missing | Status::Upcoming),
             page: None,
             queued: None,
             quality: None,
             upgrade: None,
             upgraded: None,
+            request: None,
         }
     }
 }
@@ -280,6 +296,9 @@ pub fn rows(
                 .and_then(|state| DownloadBadge::new(state, &page));
             row.page = Some(page);
         }
+        if enabled(Service::Requester, &loaded.config) {
+            add_requests(conn, &states, &mut rows)?;
+        }
     }
     let owned = rows.iter().any(|r| !r.owned_in.is_empty());
     if owned {
@@ -293,6 +312,44 @@ pub fn rows(
             .then(a.title.cmp(&b.title))
     });
     Ok((entries, rows))
+}
+
+/// What requesting the albums you don't have is at.
+fn add_requests(
+    conn: &Connection,
+    states: &HashMap<String, String>,
+    rows: &mut [Row],
+) -> anyhow::Result<()> {
+    use crate::state::downloads::{DOWNLOADING, MANUAL};
+    let requests = crate::state::requests::all(conn)?;
+    for row in rows.iter_mut().filter(|r| r.downloadable) {
+        let request = requests.get(&row.key);
+        let going = states
+            .get(&row.key)
+            .is_some_and(|s| s == DOWNLOADING || s == MANUAL);
+        if going && request.is_none() {
+            continue;
+        }
+        row.request = Some(RequestView {
+            path: format!("/release-groups/{}", row.key),
+            requested: request.is_some(),
+            hint: match request {
+                Some(r) => match r.result.as_deref().zip(r.checked_at) {
+                    Some((result, at)) => format!(
+                        "Requested {}. Last looked {}: {result}. Take the request back",
+                        r.requested_at.strftime("%Y-%m-%d"),
+                        at.strftime("%Y-%m-%d")
+                    ),
+                    None => format!(
+                        "Requested {}; not looked for yet. Take the request back",
+                        r.requested_at.strftime("%Y-%m-%d")
+                    ),
+                },
+                None => "Look for it on Soulseek until it's there, and download it".into(),
+            },
+        });
+    }
+    Ok(())
 }
 
 /// Owned albums' qualities, and what upgrading them is at.

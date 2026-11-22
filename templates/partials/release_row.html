@@ -23,6 +23,13 @@
       <button class="small" hx-post="{{ upgrade.path }}" title="{{ upgrade.hint }}">Upgrade</button>
       {% endif %}
     {% endif %}
+    {% if let Some(request) = row.request %}
+      {% if request.requested %}
+      <button class="small" hx-post="{{ request.path }}/unrequest" title="{{ request.hint }}">Requested ✕</button>
+      {% else %}
+      <button class="small" hx-post="{{ request.path }}/request" title="{{ request.hint }}">Request</button>
+      {% endif %}
+    {% endif %}
     {% if let Some(path) = row.ignore_path %}
       {% if row.status == "ignored" %}
       <button class="small" hx-post="{{ path }}/unignore">Unignore</button>

@@ -10,6 +10,7 @@ use rusqlite_migration::{M, Migrations};
 pub mod daemon;
 pub mod downloads;
 pub mod library;
+pub mod requests;
 pub mod upgrades;
 
 const MIGRATION_LIST: &[M<'static>] = &[
@@ -23,6 +24,7 @@ const MIGRATION_LIST: &[M<'static>] = &[
     M::up(include_str!("upgrades.sql")),
     M::up(include_str!("untagged_ignored.sql")),
     M::up(include_str!("upgraded.sql")),
+    M::up(include_str!("requests.sql")),
 ];
 const MIGRATIONS: Migrations<'static> = Migrations::from_slice(MIGRATION_LIST);
 

@@ -28,7 +28,8 @@ const KILL_GRACE: Duration = Duration::from_secs(5);
 /// What a notification says.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Message {
-    /// `releases`, `download` (one needs you), `upgrade` or `test`.
+    /// `releases`, `download` (one needs you), `upgrade`, `request` (albums
+    /// you requested, downloaded) or `test`.
     pub kind: &'static str,
     pub title: String,
     pub message: String,
@@ -43,6 +44,21 @@ pub struct Message {
     /// The albums upgraded (`kind` `upgrade`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub upgrades: Vec<UpgradeNote>,
+    /// The albums you requested, downloaded (`kind` `request`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub requests: Vec<RequestNote>,
+}
+
+/// An album you requested, downloaded and filed, as the command gets it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RequestNote {
+    pub album: String,
+    pub artist: String,
+    pub release_group_mbid: String,
+    /// "FLAC 16-bit/44.1 kHz", …
+    pub quality: String,
+    /// Where it is.
+    pub folder: String,
 }
 
 /// An album upgraded, as the command gets it.
@@ -125,6 +141,7 @@ pub fn message(rows: &[Row], today: jiff::civil::Date) -> Message {
             kind: "releases",
             download: None,
             upgrades: Vec::new(),
+            requests: Vec::new(),
             title: format!("New release: {}", row.artist),
             message: format!("{} ({}){when}.", row.title, row.kind),
             url: Some(row.link.clone()),
@@ -137,6 +154,7 @@ pub fn message(rows: &[Row], today: jiff::civil::Date) -> Message {
         kind: "releases",
         download: None,
         upgrades: Vec::new(),
+        requests: Vec::new(),
         title: format!("{count} new releases"),
         message: format!("{count} new releases by artists you follow."),
         url: None,
@@ -173,6 +191,7 @@ pub fn test_message() -> Message {
         kind: "test",
         download: None,
         upgrades: Vec::new(),
+        requests: Vec::new(),
         title: "newcut".into(),
         message: "newcut can reach you: new releases will show up here.".into(),
         url: None,
@@ -201,6 +220,7 @@ pub fn download_message(note: DownloadNote, url: Option<String>) -> Message {
         releases: Vec::new(),
         download: Some(note),
         upgrades: Vec::new(),
+        requests: Vec::new(),
     }
 }
 
@@ -236,6 +256,54 @@ pub fn upgrade_message(notes: Vec<UpgradeNote>, url: Option<String>) -> Message 
         releases: Vec::new(),
         download: None,
         upgrades: notes,
+        requests: Vec::new(),
+    }
+}
+
+/// What to say about albums you requested, just downloaded and filed;
+/// `url` is where to see them.
+#[must_use]
+pub fn request_message(notes: Vec<RequestNote>, url: Option<String>) -> Message {
+    let (title, message) = match notes.as_slice() {
+        [note] => (
+            if note.artist.is_empty() {
+                "Requested album downloaded".to_string()
+            } else {
+                format!("Downloaded: {}", note.artist)
+            },
+            if note.quality.is_empty() {
+                format!("{} is in your library.", note.album)
+            } else {
+                format!("{} ({}) is in your library.", note.album, note.quality)
+            },
+        ),
+        notes => (
+            format!("{} requested albums downloaded", notes.len()),
+            notes
+                .iter()
+                .map(|n| {
+                    if n.artist.is_empty() {
+                        n.album.clone()
+                    } else {
+                        format!("{} — {}", n.artist, n.album)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+                + ".",
+        ),
+    };
+    Message {
+        kind: "request",
+        title,
+        message,
+        url_title: url.as_ref().map(|_| "See it in newcut".into()),
+        url,
+        count: notes.len(),
+        releases: Vec::new(),
+        download: None,
+        upgrades: Vec::new(),
+        requests: notes,
     }
 }
 
@@ -346,6 +414,7 @@ mod tests {
             quality: None,
             upgrade: None,
             upgraded: None,
+            request: None,
         }
     }
 
@@ -374,6 +443,33 @@ mod tests {
         assert_eq!(two.count, 2);
         let release = serde_json::to_value(test_message()).unwrap();
         assert!(release.get("upgrades").is_none(), "only on upgrades");
+    }
+
+    #[test]
+    fn says_what_you_requested_was_downloaded() {
+        let note = |album: &str| RequestNote {
+            album: album.into(),
+            artist: "Radiohead".into(),
+            release_group_mbid: "rg".into(),
+            quality: "FLAC 16-bit/44.1 kHz".into(),
+            folder: "/music/x".into(),
+        };
+        let one = request_message(vec![note("OK Computer")], None);
+        assert_eq!(one.kind, "request");
+        assert_eq!(one.title, "Downloaded: Radiohead");
+        assert_eq!(
+            one.message,
+            "OK Computer (FLAC 16-bit/44.1 kHz) is in your library."
+        );
+        let json = serde_json::to_value(&one).unwrap();
+        assert_eq!(json["requests"][0]["quality"], "FLAC 16-bit/44.1 kHz");
+        assert!(json.get("upgrades").is_none());
+        let two = request_message(vec![note("A"), note("B")], Some("http://x".into()));
+        assert_eq!(two.title, "2 requested albums downloaded");
+        assert_eq!(two.message, "Radiohead — A, Radiohead — B.");
+        assert_eq!(two.count, 2);
+        let release = serde_json::to_value(test_message()).unwrap();
+        assert!(release.get("requests").is_none(), "only on requests");
     }
 
     #[test]

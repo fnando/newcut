@@ -479,6 +479,8 @@ pub struct ScheduleConfig {
     pub notification: Every,
     /// Look for upgrades of albums below `upgrade.target`.
     pub upgrade: Every,
+    /// Look on Soulseek again for the albums you requested and it didn't have.
+    pub request: Every,
 }
 
 impl Default for ScheduleConfig {
@@ -491,6 +493,7 @@ impl Default for ScheduleConfig {
             new_window: hours(60 * 24),
             notification: hours(24),
             upgrade: hours(24),
+            request: hours(6),
         }
     }
 }

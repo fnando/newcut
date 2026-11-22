@@ -714,6 +714,7 @@ fn release_chips(rows: &[Row], status: &str) -> Vec<Chip> {
         ("new", "New"),
         ("owned", "Owned"),
         ("ignored", "Ignored"),
+        ("requested", "Requested"),
         ("upgraded", "Upgraded"),
         ("other", "Not counted"),
     ]
@@ -733,6 +734,7 @@ fn row_is(row: &Row, status: &str) -> bool {
         "" => row.status != "other" && row.status != "ignored",
         "new" => row.is_new,
         "upgraded" => row.upgraded.is_some(),
+        "requested" => row.request.as_ref().is_some_and(|r| r.requested),
         key => row.status == key,
     }
 }
@@ -970,6 +972,17 @@ async fn release_group_action(
             run_now(&web, Service::Upgrader.name()).await?;
             return Ok(refresh());
         }
+        "request" => {
+            web.db(move |conn, _, _| crate::request::request(conn, &mbid))
+                .await?;
+            run_now(&web, Service::Requester.name()).await?;
+            return Ok(refresh());
+        }
+        "unrequest" => {
+            web.db(move |conn, _, _| crate::request::unrequest(conn, &mbid))
+                .await?;
+            return Ok(refresh());
+        }
         _ => return Ok(not_found("such action")),
     };
     web.db(move |conn, _, _| {
@@ -1128,7 +1141,7 @@ async fn missing_page(
         "/missing",
         query,
         |r| matches!(r.status.as_str(), "missing" | "upcoming"),
-        &["missing", "upcoming", "new"],
+        &["missing", "upcoming", "new", "requested"],
         |_| {},
     )
     .await?;

@@ -75,6 +75,11 @@ pub enum Command {
     Ignore(IgnoreArgs),
     /// Count a release group in again
     Unignore(IgnoreArgs),
+    /// Have newcut look for a release group on Soulseek (even one still
+    /// to come) until it's there, and download it
+    Request(IgnoreArgs),
+    /// Take a request back
+    Unrequest(IgnoreArgs),
     /// Check, show or import the config
     Config {
         #[command(subcommand)]
