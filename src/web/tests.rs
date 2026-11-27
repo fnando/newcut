@@ -1643,6 +1643,20 @@ async fn albums_you_dont_have_can_be_requested() {
         .await
         .2
     };
+    let web = s.web.clone();
+    let artist_page_with = |query: &'static str| {
+        let web = web.clone();
+        async move {
+            call(
+                &web,
+                get(&format!("/artists/{ARTIST}{query}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .2
+        }
+    };
     let request_path = format!("/release-groups/{GROUP_UPCOMING}/request");
     {
         let state = Db::open(&s.web.db).unwrap();
@@ -1654,6 +1668,27 @@ async fn albums_you_dont_have_can_be_requested() {
                 artist_credit: Some("Artist & Co".into()),
                 primary_type: Some("Album".into()),
                 first_release_date: Some("2099-01-01".into()),
+                artist_mbids: vec![ARTIST.into()],
+                ..NewReleaseGroup::default()
+            },
+            "musicbrainz",
+            jiff::Timestamp::now(),
+        )
+        .unwrap();
+    }
+    const GROUP_LIVE: &str = "aaaaaaaa-0000-4000-8000-000000000098";
+    {
+        // Live albums aren't counted (by default): still yours to request.
+        let state = Db::open(&s.web.db).unwrap();
+        library::upsert_release_group(
+            &state.conn,
+            &NewReleaseGroup {
+                mbid: GROUP_LIVE.into(),
+                title: "Live Five".into(),
+                artist_credit: Some("Artist & Co".into()),
+                primary_type: Some("Album".into()),
+                secondary_types: vec!["Live".into()],
+                first_release_date: Some("2010".into()),
                 artist_mbids: vec![ARTIST.into()],
                 ..NewReleaseGroup::default()
             },
@@ -1688,6 +1723,22 @@ async fn albums_you_dont_have_can_be_requested() {
     assert!(
         !body.contains(&format!("/release-groups/{GROUP_OWNED}/request")),
         "not what you have"
+    );
+    let body = artist_page_with("?status=other").await;
+    assert!(body.contains("Live Five"), "{body}");
+    assert!(
+        body.contains(&format!("/release-groups/{GROUP_LIVE}/request"))
+            && body.contains(&format!("href=\"/download/{GROUP_LIVE}\"")),
+        "not counted, but yours to get: {body}"
+    );
+    {
+        let state = Db::open(&s.web.db).unwrap();
+        library::set_ignored(&state.conn, GROUP_MISSING, true, jiff::Timestamp::now()).unwrap();
+    }
+    let body = artist_page_with("?status=ignored").await;
+    assert!(
+        body.contains(&format!("/release-groups/{GROUP_MISSING}/request")),
+        "ignored, but yours to get: {body}"
     );
 
     let (status, _, _) = call(&s.web, post(&s.web, &request_path)).await;

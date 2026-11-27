@@ -3,7 +3,6 @@
 //! album's releases exactly (closest to `upgrade.target` while meeting it,
 //! else the best there is) is queued, and the importer files it.
 
-use std::collections::HashSet;
 use std::fmt::Write as _;
 
 use jiff::Timestamp;
@@ -43,8 +42,8 @@ impl Tally {
 }
 
 /// The requests to look for now, oldest first, and how many there are.
-/// Those for albums you have now are forgotten; ignored ones, and those
-/// with a download going or waiting for you, wait.
+/// Those for albums you have now are forgotten; those with a download going
+/// or waiting for you wait. Ignored albums are looked for too: you asked.
 ///
 /// # Errors
 ///
@@ -53,15 +52,9 @@ pub fn due(conn: &rusqlite::Connection, now: Timestamp) -> anyhow::Result<(Vec<S
     requests::drop_owned(conn)?;
     let all = requests::all(conn)?;
     let states = downloads::release_states(conn)?;
-    let ignored: HashSet<String> = {
-        let mut stmt = conn.prepare("SELECT rg_mbid FROM ignored")?;
-        stmt.query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?
-    };
     let mut due: Vec<&requests::Request> = all
         .values()
         .filter(|r| r.due(now))
-        .filter(|r| !ignored.contains(&r.rg_mbid))
         .filter(|r| {
             !states
                 .get(&r.rg_mbid)
@@ -464,7 +457,8 @@ mod tests {
         let checked = request_now.checked_at.unwrap();
         assert_eq!(next.duration_since(checked).as_secs(), 6 * 3600);
         assert_eq!(work.requests().await.unwrap(), "1 requested; none due");
-        // Asked again: right away.
+        // Asked again: right away, ignored or not.
+        library::set_ignored(&work.state.conn, GROUP, true, Timestamp::now()).unwrap();
         request(&work.state.conn, GROUP).unwrap();
         assert!(work.requests().await.unwrap().starts_with("1 searched"));
         unrequest(&work.state.conn, GROUP).unwrap();

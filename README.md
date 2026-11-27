@@ -183,8 +183,8 @@ folder newcut had slskd put them in is deleted.
 ### Requests
 
 Want an album that isn't on Soulseek yet, or isn't even out? Request it:
-"Request", on any album you don't have (missing or upcoming), or `newcut
-request <release-group-mbid>`. With slskd filing downloads (`downloads_dir`
+"Request", on any album you don't have (missing, upcoming, not counted or
+ignored), or `newcut request <release-group-mbid>`. With slskd filing downloads (`downloads_dir`
 and `output_dir`), the `requester` searches Soulseek for it right away, and
 again every `schedule.request` (`6h`) until it's there. Then it queues the
 folder that matches one of the album's releases exactly and is closest to
@@ -197,8 +197,8 @@ you requested, you're told (through the `[notification]` channels):
 library." (several at once: "3 requested albums downloaded"). Until then, "Requested ✕" (or
 `newcut unrequest`) takes it back; hover over it for what the last look
 found. Requested albums have their own chip on Missing and on artists'
-pages. Upcoming albums also lead to their download page, so you can search
-for them yourself.
+pages. Those albums all lead to their download page too, so you can search for
+them yourself.
 
 ```toml
 [schedule]

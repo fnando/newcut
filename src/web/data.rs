@@ -95,7 +95,8 @@ pub struct Row {
     pub link: String,
     pub link_label: String,
     pub source: String,
-    /// You don't have it (out or still to come): something to download.
+    /// You don't have it (out or still to come, counted, ignored or not):
+    /// something to download.
     #[serde(skip)]
     pub downloadable: bool,
     /// Where the title leads, when not to `link`: the download page
@@ -192,7 +193,7 @@ impl Row {
             link: format!("https://musicbrainz.org/release-group/{}", g.mbid),
             link_label: "MusicBrainz".into(),
             source: g.source.clone(),
-            downloadable: matches!(entry.status, Status::Missing | Status::Upcoming),
+            downloadable: !matches!(entry.status, Status::Owned),
             page: None,
             queued: None,
             quality: None,
