@@ -1,6 +1,6 @@
 [package]
 name = "newcut"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2024"
 description = "Know which albums you have, which you don't, and what's new from the artists in your music library."
 license = "MIT"
