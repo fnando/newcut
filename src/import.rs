@@ -132,6 +132,57 @@ pub fn album_dir(template: &str, release: &ReleaseInfo) -> PathBuf {
     PathBuf::from(fill(template, |name| safe(&value(name, release))))
 }
 
+/// `path` as the folders already there spell it: each folder in it that
+/// isn't there by that exact name, but is by one that differs only in case
+/// or Unicode normalization ("Down by Law" for "Down By Law"), is that one.
+/// On a case-sensitive disk, that's the difference between filing an
+/// album with the artist's other albums and next to them, in a folder that
+/// case-insensitive machines (macOS, SMB shares) can't tell from theirs.
+#[must_use]
+pub fn as_on_disk(path: &Path) -> PathBuf {
+    use std::path::Component;
+    use unicode_normalization::UnicodeNormalization as _;
+    let fold = |name: &str| name.nfc().collect::<String>().to_lowercase();
+    let mut out = PathBuf::new();
+    let mut on_disk = true;
+    for component in path.components() {
+        let Component::Normal(name) = component else {
+            out.push(component);
+            continue;
+        };
+        let Some(text) = name.to_str().filter(|_| on_disk) else {
+            out.push(name);
+            continue;
+        };
+        let parent = if out.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            &out
+        };
+        let mut names: Vec<String> = std::fs::read_dir(parent)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        let wanted = fold(text);
+        let found = names
+            .iter()
+            .find(|n| n.as_str() == text)
+            .or_else(|| names.iter().find(|n| fold(n) == wanted));
+        if let Some(existing) = found {
+            out.push(existing);
+        } else {
+            // Not there yet: neither is anything under it.
+            on_disk = false;
+            out.push(name);
+        }
+    }
+    out
+}
+
 /// `template` with each `%{name}` as `value` says.
 fn fill(template: &str, value: impl Fn(&str) -> String) -> String {
     let mut out = String::new();
@@ -383,7 +434,7 @@ async fn save_cover(http: &crate::http::Http, release: &str, dir: &Path) {
 /// Says what's wrong, for the manual queue.
 pub fn file(filing: &Filing) -> Result<PathBuf, String> {
     let release = filing.release;
-    let target = album_dir(filing.template, release);
+    let target = as_on_disk(&album_dir(filing.template, release));
     let mut moves = Vec::new();
     for (i, (remote, _)) in filing.files.iter().enumerate() {
         let from = downloaded_path(&filing.source, remote);
@@ -702,6 +753,77 @@ mod tests {
         );
         assert_eq!(safe(" ..AC/DC. "), "AC_DC");
         assert_eq!(safe("..."), "_");
+    }
+
+    #[test]
+    fn folders_there_already_are_used_whatever_their_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("Down By Law/Fly the Flag (1999)")).unwrap();
+        std::fs::create_dir_all(root.join("Café")).unwrap();
+        assert_eq!(
+            as_on_disk(&root.join("Down by Law/Fly The Flag (1999)")),
+            root.join("Down By Law/Fly the Flag (1999)")
+        );
+        assert_eq!(
+            as_on_disk(&root.join("down by law/Blue (1992)")),
+            root.join("Down By Law/Blue (1992)"),
+            "what isn't there yet is as asked"
+        );
+        // "Cafe" + a combining acute accent: the same name.
+        assert_eq!(as_on_disk(&root.join("cafe\u{301}/x")), root.join("Café/x"));
+        assert_eq!(as_on_disk(&root.join("New/One")), root.join("New/One"));
+    }
+
+    #[test]
+    fn a_download_goes_into_the_folder_there_already() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let album = root.join("music/Down By Law/Fly the Flag (1999)");
+        std::fs::create_dir_all(&album).unwrap();
+        std::fs::write(album.join("1. One.lrc"), "lyrics").unwrap();
+        let source = root.join("downloads/x");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/silence.flac"),
+            source.join("01 One.flac"),
+        )
+        .unwrap();
+        let release = ReleaseInfo {
+            title: "Fly the Flag".into(),
+            artist: Credit {
+                name: "Down by Law".into(),
+                ..Credit::default()
+            },
+            original_date: Some("1999".into()),
+            tracks: vec![TrackInfo {
+                mbid: "t1".into(),
+                disc: 1,
+                position: 1,
+                title: "One".into(),
+                ..TrackInfo::default()
+            }],
+            ..ReleaseInfo::default()
+        };
+        let template = format!(
+            "{}/music/%{{artist}}/%{{album}} (%{{year}})",
+            root.display()
+        );
+        let filed = file(&Filing {
+            source,
+            files: &[("u\\Album\\01 One.flac".into(), 1)],
+            tracks: &[Some("t1".into())],
+            release: &release,
+            template: &template,
+            partial: false,
+            replacing: None,
+        })
+        .unwrap();
+        assert_eq!(filed, album);
+        assert!(album.join("1. One.flac").is_file());
+        assert!(album.join("1. One.lrc").is_file(), "what was there stays");
+        let artists: Vec<_> = std::fs::read_dir(root.join("music")).unwrap().collect();
+        assert_eq!(artists.len(), 1, "no second artist folder");
     }
 
     #[test]

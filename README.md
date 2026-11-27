@@ -149,7 +149,10 @@ scanned. The rest wait on the Downloads page: tag one as a release you pick
 MusicBrainz IDs, joined with `; ` as Picard does), `%{artist_sort}`,
 `%{album}`, `%{year}` (the first release's), `%{date}`, `%{release_year}`, `%{country}`,
 `%{media}`, `%{label}`, `%{catalog_number}`, `%{type}`, `%{releaseid}` and
-`%{releasegroupid}`.
+`%{releasegroupid}`. Folders that are there already are used as they're spelled:
+an album by "Down by Law" goes into your `Down By Law` folder, not a new one
+next to it (on a case-sensitive disk, macOS and SMB shares can't tell those
+apart).
 
 When a download fails (slskd couldn't get every file), the importer searches
 Soulseek again and queues the best folder that's lossless, matches one of the
